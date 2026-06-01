@@ -9,6 +9,7 @@ import os
 import io
 import urllib.parse
 import json
+import pytesseract
 
 # ==========================================
 # 1. TEMEL FONKSİYONLAR VE VERİTABANI
@@ -67,10 +68,8 @@ def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items
     
     y += 20; draw.line((50, y, 750, y), fill=(0,0,0), width=3); y += 20
 
-    # Evrensel Simgeleri Ayıklama İşlemi
     sym = "$" if "USD" in currency else ("€" if "EUR" in currency else ("₺" if "TRY" in currency else currency))
 
-    # YENİ TABLO BAŞLIKLARI (Tam PDF'teki gibi sadeleştirildi)
     draw.text((50, y), "Series", fill=(0,0,0), font=f_bold)
     draw.text((150, y), "Model", fill=(0,0,0), font=f_bold)
     draw.text((470, y), "Pcs", fill=(0,0,0), font=f_bold)
@@ -89,11 +88,9 @@ def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items
     
     y += 10; draw.line((50, y, 750, y), fill=(0,0,0), width=3); y += 20
 
-    # ALT TOPLAMLAR (Sadece Sembol Kullanıldı)
     draw.text((350, y), "TOTAL PCS", fill=(100,100,100), font=f_bold); draw.text((550, y), f": {grand_pcs}", fill=(0,0,0), font=f_bold); y += 35
     draw.text((350, y), "TOTAL", fill=(100,100,100), font=f_bold); draw.text((550, y), f": {raw_total:.2f} {sym}", fill=(0,0,0), font=f_bold); y += 40
     
-    # NET TOTAL 
     draw.line((350, y, 750, y), fill=(200,200,200), width=2); y += 20
     draw.text((350, y), "NET TOTAL", fill=(0,0,0), font=f_net); draw.text((550, y), f": {discounted_total:.2f} {sym}", fill=(34,139,34), font=f_net); y += 55
     
@@ -149,10 +146,36 @@ def mod_satis_ekrani():
         return
 
     st.header("Satış Ekranı")
-    c1, c2 = st.columns(2)
-    kamera = c1.camera_input("📷 Kamera ile Barkod Okut")
-    barkod_giris = c2.text_input("✍️ Veya Barkodu Klavyeden Girip Enter'a Bas")
-    barkod = (decode(Image.open(kamera))[0].data.decode() if kamera and decode(Image.open(kamera)) else None) or barkod_giris
+    
+    # YENİ EKLENEN OCR VE ÇOKLU OKUTMA SİSTEMİ
+    okuma_secenegi = st.radio("Okutma Yöntemi Seçin:", ["Klavyeden Elle Gir / Bluetooth Tabanca", "Barkod / Karekod Oku", "Düz Yazı Oku (OCR)"])
+    barkod = None
+    
+    if okuma_secenegi == "Klavyeden Elle Gir / Bluetooth Tabanca":
+        barkod = st.text_input("✍️ Ürün Kodunu Girip Enter'a Basın")
+        
+    elif okuma_secenegi == "Barkod / Karekod Oku":
+        kamera = st.camera_input("📷 Çizgili Barkod / Karekod Okut")
+        if kamera:
+            decoded = decode(Image.open(kamera))
+            if decoded:
+                barkod = decoded[0].data.decode()
+            else:
+                st.warning("Barkod okunamadı.")
+                
+    elif okuma_secenegi == "Düz Yazı Oku (OCR)":
+        st.info("Kamerayı ürün kodunun tam karşısında tutun. Sadece orta yatay alan okunur.")
+        kamera_ocr = st.camera_input("📷 Ürün Kodunun Fotoğrafını Çekin")
+        if kamera_ocr:
+            img = Image.open(kamera_ocr)
+            genislik, yukseklik = img.size
+            kirpilmis_img = img.crop((0, yukseklik * 0.35, genislik, yukseklik * 0.65))
+            st.image(kirpilmis_img, caption="Okunan Yatay Alan")
+            okunan_metin = pytesseract.image_to_string(kirpilmis_img).strip()
+            if okunan_metin:
+                barkod = okunan_metin
+            else:
+                st.error("Yazı okunamadı. Lütfen tam ortalayıp tekrar çekin.")
 
     if barkod:
         urun = c.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
@@ -161,7 +184,8 @@ def mod_satis_ekrani():
             if st.button("Satış Listesine / Sepete Ekle", use_container_width=True):
                 st.session_state.sepet.append({'id': urun[0], 'isim': urun[2], 'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]})
                 st.rerun()
-        else: st.warning("Bu barkoda ait ürün bulunamadı.")
+        else: 
+            st.warning("Bu barkoda ait ürün bulunamadı.")
 
     st.divider()
     if not st.session_state.get('sepet'): return st.info("Satış listesi boş. Lütfen yukarıdan ürün okutun.")
