@@ -131,9 +131,16 @@ def mod_yeni_urun():
         c1, c2 = st.columns(2)
         seri_adedi, stok = c1.selectbox("Seri İçi Adet", [4,5,6,7,8,10,12]), c1.number_input("Stok (Seri)", min_value=0)
         para, fiyat = c2.selectbox("Para Birimi", ["USD ($)", "EUR (€)", "TRY (₺)"]), c2.number_input("Birim Fiyat (1 Adet Ürün Fiyatı)", min_value=0.0)
+        
         if st.form_submit_button("Kaydet") and barkod and isim:
-            c.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod, isim, resim, seri_adedi, stok, fiyat, para))
-            conn.commit(); st.success("✅ Ürün başarıyla eklendi!")
+            mevcut_urun = c.execute("SELECT id FROM urunler WHERE barkod=?", (barkod,)).fetchone()
+            
+            if mevcut_urun:
+                st.error("⚠️ Hata: Bu barkod / model koduna sahip bir ürün zaten var! Aynı barkodu iki kez ekleyemezsiniz.")
+            else:
+                c.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod, isim, resim, seri_adedi, stok, fiyat, para))
+                conn.commit()
+                st.success("✅ Ürün başarıyla eklendi!")
 
 def mod_satis_ekrani():
     if st.session_state.get('son_satis_fisi'):
@@ -146,8 +153,6 @@ def mod_satis_ekrani():
         return
 
     st.header("Satış Ekranı")
-    
-    # YENİ EKLENEN OCR VE ÇOKLU OKUTMA SİSTEMİ
     okuma_secenegi = st.radio("Okutma Yöntemi Seçin:", ["Klavyeden Elle Gir / Bluetooth Tabanca", "Barkod / Karekod Oku", "Düz Yazı Oku (OCR)"])
     barkod = None
     
@@ -283,26 +288,25 @@ def mod_gecmis():
         except json.JSONDecodeError:
             st.warning("⚠️ Bu sipariş eski bir formatla kaydedildiği için detayları görüntülenemiyor. İsterseniz yukarıdaki sil butonunu kullanarak bu kaydı temizleyebilirsiniz.")
 
-def mod_yeni_urun():
-    st.header("Yeni Ürün Tanımla")
-    with st.form("urun_ekle"):
-        isim, barkod, resim = st.text_input("Ürün İsmi / Model Kodu"), st.text_input("Barkod"), st.text_input("Resim URL")
-        c1, c2 = st.columns(2)
-        seri_adedi, stok = c1.selectbox("Seri İçi Adet", [4,5,6,7,8,10,12]), c1.number_input("Stok (Seri)", min_value=0)
-        para, fiyat = c2.selectbox("Para Birimi", ["USD ($)", "EUR (€)", "TRY (₺)"]), c2.number_input("Birim Fiyat (1 Adet Ürün Fiyatı)", min_value=0.0)
-        
-        if st.form_submit_button("Kaydet") and barkod and isim:
-            # SİSTEME EKLENEN YENİ GÜVENLİK KONTROLÜ
-            mevcut_urun = c.execute("SELECT id FROM urunler WHERE barkod=?", (barkod,)).fetchone()
-            
-            if mevcut_urun:
-                # Eğer aynı barkod varsa hata ver ve kaydetmeyi durdur
-                st.error("⚠️ Hata: Bu barkod / model koduna sahip bir ürün zaten var! Aynı barkodu iki kez ekleyemezsiniz.")
-            else:
-                # Yoksa normal bir şekilde kaydet
-                c.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod, isim, resim, seri_adedi, stok, fiyat, para))
-                conn.commit()
-                st.success("✅ Ürün başarıyla eklendi!")
+def mod_urun_duzenle():
+    st.header("Ürün Düzenle / Sil")
+    urunler = c.execute("SELECT id, isim, barkod FROM urunler").fetchall()
+    if not urunler: return st.info("Sistemde kayıtlı ürün bulunmuyor.")
+    
+    sec = st.selectbox("Düzenlenecek Ürünü Seçin", {f"{u[1]} ({u[2]})": u[0] for u in urunler}.keys())
+    u_id = {f"{u[1]} ({u[2]})": u[0] for u in urunler}[sec]
+    urun = c.execute("SELECT * FROM urunler WHERE id=?", (u_id,)).fetchone()
+    
+    y_isim, y_barkod = st.text_input("Ürün İsmi / Model Kodu", urun[2]), st.text_input("Barkod Numarası", urun[1])
+    c1, c2 = st.columns(2)
+    y_seri, y_stok = c1.selectbox("Seri İçi Ürün Adedi", [4,5,6,7,8,10,12], index=[4,5,6,7,8,10,12].index(urun[4])), c1.number_input("Güncel Stok (Seri)", value=urun[5])
+    y_fiyat = c2.number_input("1 Adet Ürün Birim Fiyatı", value=urun[6])
+    
+    if st.button("💾 Değişiklikleri Kaydet", use_container_width=True):
+        c.execute("UPDATE urunler SET barkod=?, isim=?, seri_adedi=?, stok_seri=?, fiyat=? WHERE id=?", (y_barkod, y_isim, y_seri, y_stok, y_fiyat, u_id))
+        conn.commit(); st.success("✅ Ürün kaydı başarıyla güncellendi!")
+    if st.button("❌ Ürünü Sistemden Tamamen Sil", use_container_width=True):
+        c.execute("DELETE FROM urunler WHERE id=?", (u_id,)); conn.commit(); st.error("🗑️ Ürün veritabanından silindi!"); st.rerun()
 
 def mod_crm():
     st.header("📇 Müşteri Veritabanı (CRM)")
