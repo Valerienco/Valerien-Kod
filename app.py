@@ -119,9 +119,19 @@ def mod_stok_durumu():
     df = pd.read_sql_query("SELECT * FROM urunler", conn)
     if df.empty: st.info("Sistemde ürün yok.")
     for _, row in df.iterrows():
-        c1, c2 = st.columns([1, 4])
+        # Ekranı 3 sütuna bölüyoruz: Resim, Bilgiler ve Sil Butonu
+        c1, c2, c3 = st.columns([1, 3, 1]) 
+        
         if row['resim_url']: c1.image(row['resim_url'], width=150)
+        
         c2.write(f"### {row['isim']}\n**Barkod:** {row['barkod']} | **Seri İçi:** {row['seri_adedi']} Adet | **Stok:** {row['stok_seri']} Seri\n**Birim Fiyat:** {row['fiyat']} {row['para_birimi']}")
+        
+        # Sağ tarafa her ürün için özel bir hızlı silme butonu ekliyoruz
+        if c3.button("🗑️ Hızlı Sil", key=f"hizli_sil_{row['id']}"):
+            c.execute("DELETE FROM urunler WHERE id=?", (row['id'],))
+            conn.commit()
+            st.rerun() # Ürün silindiği an sayfayı yenile ve ekrandan kaldır
+            
         st.divider()
 
 def mod_yeni_urun():
@@ -238,7 +248,7 @@ def mod_satis_ekrani():
                       (sip_no, tarih, m_isim, m_tel, m_adres, sepet_json, t_adet, discounted_total, p_birim))
             conn.commit()
 
-            wa_msg = urllib.parse.quote(f"Hello {m_isim},\nYour MIRROR BRAND wholesale order {sip_no} is confirmed! ✔️\n\n📝 *Order Summary*:\n- Total Pieces: {t_adet}\n💰 *Net Total*: {discounted_total:.2f} {p_birim}\n\nThank you!")
+            wa_msg = urllib.parse.quote(f"Hello {m_isim},\nYour wholesale order {sip_no} is confirmed! ✔️\n\n📝 *Order Summary*:\n- Total Pieces: {t_adet}\n💰 *Net Total*: {discounted_total:.2f} {p_birim}\n\nThank you!")
             st.session_state.son_satis_fisi = {
                 "jpeg_data": create_invoice_jpeg(sip_no, tarih, m_isim, m_tel, m_adres, st.session_state.sepet, p_birim, raw_total, discounted_total),
                 "file_name": f"{sip_no}.jpg", "siparis_no": sip_no, "telefon": m_tel,
