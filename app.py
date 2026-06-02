@@ -18,11 +18,9 @@ st.set_page_config(page_title="MIRROR BRAND Wholesale", layout="wide")
 # ==========================================
 c_baslik, c_tema = st.columns([8, 2])
 with c_tema:
-    # Sayfanın sağ üst köşesine mobildeki gibi şık bir toggle (anahtar) ekliyoruz
     dark_mode = st.toggle("🌙 Koyu Tema (Dark Mode)", value=False)
 
 if dark_mode:
-    # Eğer anahtar açılırsa sisteme zarar vermeyen temel koyu tema renklerini uygula
     st.markdown("""
     <style>
         [data-testid="stAppViewContainer"] { background-color: #121212 !important; }
@@ -144,25 +142,63 @@ def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items
 def mod_stok_durumu():
     st.header("Mevcut Toptan Stoklar")
     df = pd.read_sql_query("SELECT * FROM urunler", conn)
-    if df.empty: st.info("Sistemde ürün yok.")
+    
+    if df.empty: 
+        st.info("Sistemde ürün yok.")
+        
     for _, row in df.iterrows():
         c1, c2, c3 = st.columns([1, 3, 1]) 
         
-        if row['resim_url']: c1.image(row['resim_url'], width=150)
+        # Resim Çökmelerine Karşı Koruma
+        if row['resim_url']:
+            try:
+                c1.image(row['resim_url'], width=150)
+            except Exception as e:
+                c1.error("Resim yüklenemedi. Link hatalı veya bilgisayar yolu girilmiş olabilir.")
         
         c2.write(f"### {row['isim']}\n**Barkod:** {row['barkod']} | **Seri İçi:** {row['seri_adedi']} Adet | **Stok:** {row['stok_seri']} Seri\n**Birim Fiyat:** {row['fiyat']} {row['para_birimi']}")
         
+        # Sağ Taraf Butonları
         if c3.button("🗑️ Hızlı Sil", key=f"hizli_sil_{row['id']}"):
             c.execute("DELETE FROM urunler WHERE id=?", (row['id'],))
             conn.commit()
             st.rerun() 
             
+        # --- YENİ: SATIR İÇİ HIZLI DÜZENLEME PANELİ ---
+        with st.expander("✏️ Bu Ürünü Hızlı Düzenle"):
+            with st.form(key=f"hizli_edit_{row['id']}"):
+                e_isim = st.text_input("Ürün İsmi / Model Kodu", row['isim'])
+                e_barkod = st.text_input("Barkod", row['barkod'])
+                e_resim = st.text_input("Yeni Resim URL (http ile başlamalı)", row['resim_url'] if row['resim_url'] else "")
+                
+                ec1, ec2 = st.columns(2)
+                
+                # Seri Adedi Hesaplama Koruması
+                seriler = [4, 5, 6, 7, 8, 10, 12]
+                secili_seri = row['seri_adedi'] if row['seri_adedi'] in seriler else 4
+                e_seri = ec1.selectbox("Seri İçi Adet", seriler, index=seriler.index(secili_seri))
+                
+                e_stok = ec1.number_input("Güncel Stok (Seri)", value=int(row['stok_seri']))
+                e_fiyat = ec2.number_input("Birim Fiyat", value=float(row['fiyat']))
+                
+                # Para Birimi Hesaplama Koruması
+                paralar = ["USD ($)", "EUR (€)", "TRY (₺)"]
+                secili_para = row['para_birimi'] if row['para_birimi'] in paralar else "USD ($)"
+                e_para = ec2.selectbox("Para Birimi", paralar, index=paralar.index(secili_para))
+                
+                if st.form_submit_button("💾 Değişiklikleri Kaydet"):
+                    c.execute("UPDATE urunler SET barkod=?, isim=?, resim_url=?, seri_adedi=?, stok_seri=?, fiyat=?, para_birimi=? WHERE id=?", 
+                              (e_barkod, e_isim, e_resim, e_seri, e_stok, e_fiyat, e_para, row['id']))
+                    conn.commit()
+                    st.success("✅ Ürün başarıyla güncellendi!")
+                    st.rerun()
+                    
         st.divider()
 
 def mod_yeni_urun():
     st.header("Yeni Ürün Tanımla")
     with st.form("urun_ekle"):
-        isim, barkod, resim = st.text_input("Ürün İsmi / Model Kodu"), st.text_input("Barkod"), st.text_input("Resim URL")
+        isim, barkod, resim = st.text_input("Ürün İsmi / Model Kodu"), st.text_input("Barkod"), st.text_input("Resim URL (http ile başlayan internet linki girin)")
         c1, c2 = st.columns(2)
         seri_adedi, stok = c1.selectbox("Seri İçi Adet", [4,5,6,7,8,10,12]), c1.number_input("Stok (Seri)", min_value=0)
         para, fiyat = c2.selectbox("Para Birimi", ["USD ($)", "EUR (€)", "TRY (₺)"]), c2.number_input("Birim Fiyat (1 Adet Ürün Fiyatı)", min_value=0.0)
@@ -324,7 +360,7 @@ def mod_gecmis():
             st.warning("⚠️ Bu sipariş eski bir formatla kaydedildiği için detayları görüntülenemiyor. İsterseniz yukarıdaki sil butonunu kullanarak bu kaydı temizleyebilirsiniz.")
 
 def mod_urun_duzenle():
-    st.header("Ürün Düzenle / Sil")
+    st.header("Ürün Düzenle / Sil (Toplu Liste)")
     urunler = c.execute("SELECT id, isim, barkod FROM urunler").fetchall()
     if not urunler: return st.info("Sistemde kayıtlı ürün bulunmuyor.")
     
@@ -334,8 +370,8 @@ def mod_urun_duzenle():
     
     y_isim, y_barkod = st.text_input("Ürün İsmi / Model Kodu", urun[2]), st.text_input("Barkod Numarası", urun[1])
     c1, c2 = st.columns(2)
-    y_seri, y_stok = c1.selectbox("Seri İçi Ürün Adedi", [4,5,6,7,8,10,12], index=[4,5,6,7,8,10,12].index(urun[4])), c1.number_input("Güncel Stok (Seri)", value=urun[5])
-    y_fiyat = c2.number_input("1 Adet Ürün Birim Fiyatı", value=urun[6])
+    y_seri, y_stok = c1.selectbox("Seri İçi Ürün Adedi", [4,5,6,7,8,10,12], index=[4,5,6,7,8,10,12].index(urun[4]) if urun[4] in [4,5,6,7,8,10,12] else 0), c1.number_input("Güncel Stok (Seri)", value=urun[5])
+    y_fiyat = c2.number_input("1 Adet Ürün Birim Fiyatı", value=float(urun[6]))
     
     if st.button("💾 Değişiklikleri Kaydet", use_container_width=True):
         c.execute("UPDATE urunler SET barkod=?, isim=?, seri_adedi=?, stok_seri=?, fiyat=? WHERE id=?", (y_barkod, y_isim, y_seri, y_stok, y_fiyat, u_id))
