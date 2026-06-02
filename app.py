@@ -338,4 +338,56 @@ def mod_urun_duzenle():
     y_fiyat = c2.number_input("1 Adet Ürün Birim Fiyatı", value=urun[6])
     
     if st.button("💾 Değişiklikleri Kaydet", use_container_width=True):
-        c.execute("UPDATE urunler SET barkod=?, isim=?, seri_adedi
+        c.execute("UPDATE urunler SET barkod=?, isim=?, seri_adedi=?, stok_seri=?, fiyat=? WHERE id=?", (y_barkod, y_isim, y_seri, y_stok, y_fiyat, u_id))
+        conn.commit(); st.success("✅ Ürün kaydı başarıyla güncellendi!")
+    if st.button("❌ Ürünü Sistemden Tamamen Sil", use_container_width=True):
+        c.execute("DELETE FROM urunler WHERE id=?", (u_id,)); conn.commit(); st.error("🗑️ Ürün veritabanından silindi!"); st.rerun()
+
+def mod_crm():
+    st.header("📇 Müşteri Veritabanı (CRM)")
+    with st.form("yeni_m"):
+        isim, tel, adres = st.text_input("Müşteri / Firma Adı*"), st.text_input("Telefon Numarası"), st.text_area("Adres")
+        if st.form_submit_button("Müşteriyi Veritabanına Kaydet") and isim:
+            c.execute("INSERT INTO musteriler (isim, telefon, adres) VALUES (?,?,?)", (isim, tel, adres))
+            conn.commit(); st.success("✅ Müşteri rehbere eklendi!"); st.rerun()
+    st.divider()
+    
+    st.subheader("📋 Kayıtlı Müşterileri Düzenle / Sil")
+    musteriler = c.execute("SELECT id, isim, telefon, adres FROM musteriler").fetchall()
+    if not musteriler:
+        st.info("Sistemde kayıtlı müşteri bulunmuyor.")
+    else:
+        sec = st.selectbox("İşlem Yapılacak Müşteriyi Seçin", {f"{m[1]} ({m[2]})": m[0] for m in musteriler}.keys())
+        m_id = {f"{m[1]} ({m[2]})": m[0] for m in musteriler}[sec]
+        sec_m = c.execute("SELECT * FROM musteriler WHERE id=?", (m_id,)).fetchone()
+        
+        y_isim = st.text_input("Müşteri / Firma Adı", sec_m[1])
+        y_tel = st.text_input("Telefon Numarası", sec_m[2])
+        y_adres = st.text_area("Adres", sec_m[3])
+        
+        c1, c2 = st.columns(2)
+        if c1.button("💾 Değişiklikleri Kaydet", use_container_width=True):
+            c.execute("UPDATE musteriler SET isim=?, telefon=?, adres=? WHERE id=?", (y_isim, y_tel, y_adres, m_id))
+            conn.commit(); st.success("✅ Müşteri başarıyla güncellendi!"); st.rerun()
+        if c2.button("❌ Müşteriyi Sistemden Sil", use_container_width=True):
+            c.execute("DELETE FROM musteriler WHERE id=?", (m_id,))
+            conn.commit(); st.error("🗑️ Müşteri silindi!"); st.rerun()
+
+def mod_ayarlar():
+    st.header("⚙️ Kurumsal Kimlik & Mağaza Ayarları")
+    logo = st.file_uploader("Şirket Logonuzu Yükleyin (PNG veya JPG)", type=['png', 'jpg', 'jpeg'])
+    if logo:
+        with open("logo_sistem.png", "wb") as f: f.write(logo.getbuffer())
+        st.success("✅ Şirket logosu başarıyla güncellendi!")
+    if os.path.exists("logo_sistem.png"):
+        st.image("logo_sistem.png", width=200)
+        if st.button("Mevcut Logoyu Sistemden Sil"): os.remove("logo_sistem.png"); st.rerun()
+
+# ==========================================
+# 3. ANA ARAYÜZ
+# ==========================================
+if 'sepet' not in st.session_state: st.session_state.sepet = []
+if 'son_satis_fisi' not in st.session_state: st.session_state.son_satis_fisi = None
+
+menu = {"Satış Ekranı": mod_satis_ekrani, "Stok Durumu": mod_stok_durumu, "Yeni Ürün Ekle": mod_yeni_urun, "Geçmiş Siparişler": mod_gecmis, "Ürün Düzenle / Sil": mod_urun_duzenle, "Müşteriler (CRM)": mod_crm, "Mağaza Ayarları": mod_ayarlar}
+menu[st.sidebar.selectbox("Gitmek İstediğiniz Ekranı Seçin", list(menu.keys()))]()
