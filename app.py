@@ -10,8 +10,13 @@ import io
 import urllib.parse
 import json
 import pytesseract
+import qrcode  # YENİ: QR Kod Üretim Motoru
 
 st.set_page_config(page_title="MIRROR BRAND Wholesale", layout="wide")
+
+# Sistemde resimlerin tutulacağı ana klasörü oluşturuyoruz
+if not os.path.exists("urun_resimleri"):
+    os.makedirs("urun_resimleri")
 
 # ==========================================
 # 0. SAĞ ÜST KÖŞE DARK MODE ANAHTARI
@@ -149,31 +154,41 @@ def mod_stok_durumu():
     for _, row in df.iterrows():
         c1, c2, c3 = st.columns([1, 3, 1]) 
         
-        # Resim Çökmelerine Karşı Koruma
         if row['resim_url']:
             try:
                 c1.image(row['resim_url'], width=150)
             except Exception as e:
-                c1.error("Resim yüklenemedi. Link hatalı veya bilgisayar yolu girilmiş olabilir.")
+                c1.error("Resim yüklenemedi. Lütfen Hızlı Düzenle panelinden fotoğrafı yeniden seçin.")
         
         c2.write(f"### {row['isim']}\n**Barkod:** {row['barkod']} | **Seri İçi:** {row['seri_adedi']} Adet | **Stok:** {row['stok_seri']} Seri\n**Birim Fiyat:** {row['fiyat']} {row['para_birimi']}")
         
-        # Sağ Taraf Butonları
-        if c3.button("🗑️ Hızlı Sil", key=f"hizli_sil_{row['id']}"):
-            c.execute("DELETE FROM urunler WHERE id=?", (row['id'],))
-            conn.commit()
-            st.rerun() 
+        # Sağ Taraf Butonları (Silme ve QR)
+        with c3:
+            if st.button("🗑️ Hızlı Sil", key=f"hizli_sil_{row['id']}", use_container_width=True):
+                c.execute("DELETE FROM urunler WHERE id=?", (row['id'],))
+                conn.commit()
+                st.rerun() 
             
-        # --- YENİ: SATIR İÇİ HIZLI DÜZENLEME PANELİ ---
+            # --- YENİ: SABİT QR KOD OLUŞTURUCU ---
+            qr = qrcode.QRCode(version=1, box_size=10, border=2)
+            qr.add_data(row['barkod'])
+            qr.make(fit=True)
+            img_qr = qr.make_image(fill_color="black", back_color="white")
+            buf = io.BytesIO()
+            img_qr.save(buf, format="PNG")
+            
+            st.download_button("🖨️ QR Kod İndir", data=buf.getvalue(), file_name=f"QR_{row['barkod']}.png", mime="image/png", key=f"qr_dl_{row['id']}", use_container_width=True)
+            
+        # --- SATIR İÇİ HIZLI DÜZENLEME PANELİ ---
         with st.expander("✏️ Bu Ürünü Hızlı Düzenle"):
             with st.form(key=f"hizli_edit_{row['id']}"):
                 e_isim = st.text_input("Ürün İsmi / Model Kodu", row['isim'])
                 e_barkod = st.text_input("Barkod", row['barkod'])
-                e_resim = st.text_input("Yeni Resim URL (http ile başlamalı)", row['resim_url'] if row['resim_url'] else "")
+                
+                e_resim_dosyasi = st.file_uploader("📸 Yeni Fotoğraf Yükle (Mevcudu Değiştirmek İçin)", type=['png', 'jpg', 'jpeg'], key=f"up_{row['id']}")
                 
                 ec1, ec2 = st.columns(2)
                 
-                # Seri Adedi Hesaplama Koruması
                 seriler = [4, 5, 6, 7, 8, 10, 12]
                 secili_seri = row['seri_adedi'] if row['seri_adedi'] in seriler else 4
                 e_seri = ec1.selectbox("Seri İçi Adet", seriler, index=seriler.index(secili_seri))
@@ -181,14 +196,20 @@ def mod_stok_durumu():
                 e_stok = ec1.number_input("Güncel Stok (Seri)", value=int(row['stok_seri']))
                 e_fiyat = ec2.number_input("Birim Fiyat", value=float(row['fiyat']))
                 
-                # Para Birimi Hesaplama Koruması
                 paralar = ["USD ($)", "EUR (€)", "TRY (₺)"]
                 secili_para = row['para_birimi'] if row['para_birimi'] in paralar else "USD ($)"
                 e_para = ec2.selectbox("Para Birimi", paralar, index=paralar.index(secili_para))
                 
                 if st.form_submit_button("💾 Değişiklikleri Kaydet"):
+                    yeni_resim_yolu = row['resim_url'] 
+                    
+                    if e_resim_dosyasi is not None:
+                        yeni_resim_yolu = f"urun_resimleri/{e_barkod}.jpg"
+                        with open(yeni_resim_yolu, "wb") as f:
+                            f.write(e_resim_dosyasi.getbuffer())
+                    
                     c.execute("UPDATE urunler SET barkod=?, isim=?, resim_url=?, seri_adedi=?, stok_seri=?, fiyat=?, para_birimi=? WHERE id=?", 
-                              (e_barkod, e_isim, e_resim, e_seri, e_stok, e_fiyat, e_para, row['id']))
+                              (e_barkod, e_isim, yeni_resim_yolu, e_seri, e_stok, e_fiyat, e_para, row['id']))
                     conn.commit()
                     st.success("✅ Ürün başarıyla güncellendi!")
                     st.rerun()
@@ -198,7 +219,11 @@ def mod_stok_durumu():
 def mod_yeni_urun():
     st.header("Yeni Ürün Tanımla")
     with st.form("urun_ekle"):
-        isim, barkod, resim = st.text_input("Ürün İsmi / Model Kodu"), st.text_input("Barkod"), st.text_input("Resim URL (http ile başlayan internet linki girin)")
+        isim = st.text_input("Ürün İsmi / Model Kodu")
+        barkod = st.text_input("Barkod")
+        
+        resim_dosyasi = st.file_uploader("📸 Ürün Fotoğrafı Yükle (Zorunlu Değil, Tıklayıp Seçin)", type=['png', 'jpg', 'jpeg'])
+        
         c1, c2 = st.columns(2)
         seri_adedi, stok = c1.selectbox("Seri İçi Adet", [4,5,6,7,8,10,12]), c1.number_input("Stok (Seri)", min_value=0)
         para, fiyat = c2.selectbox("Para Birimi", ["USD ($)", "EUR (€)", "TRY (₺)"]), c2.number_input("Birim Fiyat (1 Adet Ürün Fiyatı)", min_value=0.0)
@@ -209,7 +234,13 @@ def mod_yeni_urun():
             if mevcut_urun:
                 st.error("⚠️ Hata: Bu barkod / model koduna sahip bir ürün zaten var! Aynı barkodu iki kez ekleyemezsiniz.")
             else:
-                c.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod, isim, resim, seri_adedi, stok, fiyat, para))
+                kaydedilecek_resim_yolu = ""
+                if resim_dosyasi is not None:
+                    kaydedilecek_resim_yolu = f"urun_resimleri/{barkod}.jpg"
+                    with open(kaydedilecek_resim_yolu, "wb") as f:
+                        f.write(resim_dosyasi.getbuffer())
+                
+                c.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod, isim, kaydedilecek_resim_yolu, seri_adedi, stok, fiyat, para))
                 conn.commit()
                 st.success("✅ Ürün başarıyla eklendi!")
 
