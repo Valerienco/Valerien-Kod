@@ -11,62 +11,31 @@ import urllib.parse
 import json
 import pytesseract
 
-# ==========================================
-# 0. SAYFA AYARLARI VE DİNAMİK TEMA (CSS)
-# ==========================================
 st.set_page_config(page_title="MIRROR BRAND Wholesale", layout="wide")
 
-if 'tema' not in st.session_state:
-    st.session_state.tema = 'Koyu (Dark)' # Varsayılan olarak elit koyu tema
+# ==========================================
+# 0. SAĞ ÜST KÖŞE DARK MODE ANAHTARI
+# ==========================================
+c_baslik, c_tema = st.columns([8, 2])
+with c_tema:
+    # Sayfanın sağ üst köşesine mobildeki gibi şık bir toggle (anahtar) ekliyoruz
+    dark_mode = st.toggle("🌙 Koyu Tema (Dark Mode)", value=False)
 
-# Ortak Lüks Font Ayarları
-ortak_css = """
-    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&display=swap');
-    html, body, [class*="css"], .stApp, p, h1, h2, h3, h4, h5, h6, span, label {
-        font-family: 'Montserrat', sans-serif !important;
-    }
-    .block-container { padding-top: 2rem !important; }
-    #MainMenu {visibility: hidden;} header {visibility: hidden;} footer {visibility: hidden;}
-"""
+if dark_mode:
+    # Eğer anahtar açılırsa sisteme zarar vermeyen temel koyu tema renklerini uygula
+    st.markdown("""
+    <style>
+        [data-testid="stAppViewContainer"] { background-color: #121212 !important; }
+        [data-testid="stHeader"] { background-color: #121212 !important; }
+        [data-testid="stSidebar"] { background-color: #1a1a1a !important; }
+        h1, h2, h3, h4, h5, h6, p, label, span { color: #ffffff !important; }
+        .stTextInput input, .stNumberInput input, .stTextArea textarea { background-color: #2b2b2b !important; color: #ffffff !important; border: 1px solid #444 !important;}
+        div[data-baseweb="select"] > div { background-color: #2b2b2b !important; color: #ffffff !important; border: 1px solid #444 !important;}
+    </style>
+    """, unsafe_allow_html=True)
 
-if st.session_state.tema == 'Koyu (Dark)':
-    tema_css = f"""
-    <style>
-        {ortak_css}
-        [data-testid="stAppViewContainer"] {{ background-color: #0A0A0A !important; color: #FFFFFF !important; }}
-        [data-testid="stSidebar"] {{ background-color: #111111 !important; border-right: 1px solid #222222 !important; }}
-        p, h1, h2, h3, h4, h5, h6, span, label {{ color: #FFFFFF !important; }}
-        
-        div.stButton > button:first-child {{ background-color: #FFFFFF !important; color: #000000 !important; border: 1px solid #FFFFFF !important; border-radius: 0px !important; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; padding: 10px 24px; transition: all 0.3s; box-shadow: none !important; }}
-        div.stButton > button:first-child:hover {{ background-color: #000000 !important; color: #FFFFFF !important; }}
-        
-        div[data-testid="stAlert"] {{ background-color: #1A1A1A !important; border-left: 4px solid #FFFFFF !important; color: #FFFFFF !important; border-radius: 0px !important; }}
-        div[data-testid="stAlert"] p {{ color: #FFFFFF !important; }}
-        
-        .stTextInput input, .stNumberInput input {{ background-color: #1A1A1A !important; color: #FFFFFF !important; border: 1px solid #333333 !important; border-radius: 0px !important; }}
-        [data-testid="stMetricValue"] {{ color: #FFFFFF !important; }}
-        [data-testid="stDataFrame"] {{ background-color: #111111 !important; }}
-    </style>
-    """
-else:
-    tema_css = f"""
-    <style>
-        {ortak_css}
-        [data-testid="stAppViewContainer"] {{ background-color: #FAFAFA !important; color: #000000 !important; }}
-        [data-testid="stSidebar"] {{ background-color: #F0F2F6 !important; border-right: 1px solid #E0E0E0 !important; }}
-        p, h1, h2, h3, h4, h5, h6, span, label {{ color: #000000 !important; }}
-        
-        div.stButton > button:first-child {{ background-color: #000000 !important; color: #FFFFFF !important; border: 1px solid #000000 !important; border-radius: 0px !important; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; padding: 10px 24px; transition: all 0.3s; box-shadow: none !important; }}
-        div.stButton > button:first-child:hover {{ background-color: #FFFFFF !important; color: #000000 !important; }}
-        
-        div[data-testid="stAlert"] {{ background-color: #FFFFFF !important; border-left: 4px solid #000000 !important; color: #000000 !important; border-radius: 0px !important; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }}
-        div[data-testid="stAlert"] p {{ color: #000000 !important; }}
-        
-        .stTextInput input, .stNumberInput input {{ background-color: #FFFFFF !important; color: #000000 !important; border: 1px solid #E0E0E0 !important; border-radius: 0px !important; }}
-        [data-testid="stMetricValue"] {{ color: #000000 !important; }}
-    </style>
-    """
-st.markdown(tema_css, unsafe_allow_html=True)
+with c_baslik:
+    st.title("📦 MIRROR BRAND B2B Toptan Otomasyon Sistemi")
 
 
 # ==========================================
@@ -175,24 +144,13 @@ def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items
 def mod_stok_durumu():
     st.header("Mevcut Toptan Stoklar")
     df = pd.read_sql_query("SELECT * FROM urunler", conn)
-    
-    # QoL 2: YENİ STOK ÖZET DASHBOARD'U
-    if not df.empty:
-        c1, c2 = st.columns(2)
-        c1.metric("📦 Toplam Model Çeşidi", f"{len(df)} Farklı Model")
-        c2.metric("🔢 Depodaki Toplam Seri", f"{df['stok_seri'].sum()} Seri")
-        st.divider()
-    else:
-        st.info("Sistemde ürün yok.")
-
+    if df.empty: st.info("Sistemde ürün yok.")
     for _, row in df.iterrows():
         c1, c2, c3 = st.columns([1, 3, 1]) 
         
         if row['resim_url']: c1.image(row['resim_url'], width=150)
         
-        # QoL 3: KRİTİK STOK UYARISI
-        uyari_metni = "🔴 Sınırlı Stok (Kritik)" if row['stok_seri'] <= 2 else "🟢 Yeterli Stok"
-        c2.write(f"### {row['isim']}\n**Barkod:** {row['barkod']} | **Seri İçi:** {row['seri_adedi']} Adet\n**Stok Durumu:** {row['stok_seri']} Seri ({uyari_metni})\n**Birim Fiyat:** {row['fiyat']} {row['para_birimi']}")
+        c2.write(f"### {row['isim']}\n**Barkod:** {row['barkod']} | **Seri İçi:** {row['seri_adedi']} Adet | **Stok:** {row['stok_seri']} Seri\n**Birim Fiyat:** {row['fiyat']} {row['para_birimi']}")
         
         if c3.button("🗑️ Hızlı Sil", key=f"hizli_sil_{row['id']}"):
             c.execute("DELETE FROM urunler WHERE id=?", (row['id'],))
@@ -211,6 +169,7 @@ def mod_yeni_urun():
         
         if st.form_submit_button("Kaydet") and barkod and isim:
             mevcut_urun = c.execute("SELECT id FROM urunler WHERE barkod=?", (barkod,)).fetchone()
+            
             if mevcut_urun:
                 st.error("⚠️ Hata: Bu barkod / model koduna sahip bir ürün zaten var! Aynı barkodu iki kez ekleyemezsiniz.")
             else:
@@ -340,15 +299,6 @@ def mod_gecmis():
         s = next(s for s in siparisler if f"{s[1]} - {s[3]} ({s[2]})" == sec_etiket)
         siparis_id = s[0]
         
-        # QoL 4: HIZLI KOPYALAMA ALANLARI
-        c_kopya1, c_kopya2 = st.columns(2)
-        with c_kopya1:
-            st.write("📋 **Sipariş No (Tıklayıp Kopyalayın):**")
-            st.code(s[1], language=None)
-        with c_kopya2:
-            st.write("📱 **Müşteri Tel (Tıklayıp Kopyalayın):**")
-            st.code(s[4] if s[4] else "Belirtilmedi", language=None)
-        
         if st.button("❌ Bu Siparişi Arşivden Tamamen Sil", use_container_width=True):
             c.execute("DELETE FROM siparis_gecmisi WHERE id=?", (siparis_id,))
             conn.commit()
@@ -388,71 +338,4 @@ def mod_urun_duzenle():
     y_fiyat = c2.number_input("1 Adet Ürün Birim Fiyatı", value=urun[6])
     
     if st.button("💾 Değişiklikleri Kaydet", use_container_width=True):
-        c.execute("UPDATE urunler SET barkod=?, isim=?, seri_adedi=?, stok_seri=?, fiyat=? WHERE id=?", (y_barkod, y_isim, y_seri, y_stok, y_fiyat, u_id))
-        conn.commit(); st.success("✅ Ürün kaydı başarıyla güncellendi!")
-    if st.button("❌ Ürünü Sistemden Tamamen Sil", use_container_width=True):
-        c.execute("DELETE FROM urunler WHERE id=?", (u_id,)); conn.commit(); st.error("🗑️ Ürün veritabanından silindi!"); st.rerun()
-
-def mod_crm():
-    st.header("📇 Müşteri Veritabanı (CRM)")
-    with st.form("yeni_m"):
-        isim, tel, adres = st.text_input("Müşteri / Firma Adı*"), st.text_input("Telefon Numarası"), st.text_area("Adres")
-        if st.form_submit_button("Müşteriyi Veritabanına Kaydet") and isim:
-            c.execute("INSERT INTO musteriler (isim, telefon, adres) VALUES (?,?,?)", (isim, tel, adres))
-            conn.commit(); st.success("✅ Müşteri rehbere eklendi!"); st.rerun()
-    st.divider()
-    
-    st.subheader("📋 Kayıtlı Müşterileri Düzenle / Sil")
-    musteriler = c.execute("SELECT id, isim, telefon, adres FROM musteriler").fetchall()
-    if not musteriler:
-        st.info("Sistemde kayıtlı müşteri bulunmuyor.")
-    else:
-        sec = st.selectbox("İşlem Yapılacak Müşteriyi Seçin", {f"{m[1]} ({m[2]})": m[0] for m in musteriler}.keys())
-        m_id = {f"{m[1]} ({m[2]})": m[0] for m in musteriler}[sec]
-        sec_m = c.execute("SELECT * FROM musteriler WHERE id=?", (m_id,)).fetchone()
-        
-        y_isim = st.text_input("Müşteri / Firma Adı", sec_m[1])
-        y_tel = st.text_input("Telefon Numarası", sec_m[2])
-        y_adres = st.text_area("Adres", sec_m[3])
-        
-        c1, c2 = st.columns(2)
-        if c1.button("💾 Değişiklikleri Kaydet", use_container_width=True):
-            c.execute("UPDATE musteriler SET isim=?, telefon=?, adres=? WHERE id=?", (y_isim, y_tel, y_adres, m_id))
-            conn.commit(); st.success("✅ Müşteri başarıyla güncellendi!"); st.rerun()
-        if c2.button("❌ Müşteriyi Sistemden Sil", use_container_width=True):
-            c.execute("DELETE FROM musteriler WHERE id=?", (m_id,))
-            conn.commit(); st.error("🗑️ Müşteri silindi!"); st.rerun()
-
-def mod_ayarlar():
-    st.header("⚙️ Kurumsal Kimlik & Mağaza Ayarları")
-    logo = st.file_uploader("Şirket Logonuzu Yükleyin (PNG veya JPG)", type=['png', 'jpg', 'jpeg'])
-    if logo:
-        with open("logo_sistem.png", "wb") as f: f.write(logo.getbuffer())
-        st.success("✅ Şirket logosu başarıyla güncellendi!")
-    if os.path.exists("logo_sistem.png"):
-        st.image("logo_sistem.png", width=200)
-        if st.button("Mevcut Logoyu Sistemden Sil"): os.remove("logo_sistem.png"); st.rerun()
-
-# ==========================================
-# 3. ANA ARAYÜZ VE MENÜ
-# ==========================================
-st.title("📦 MIRROR BRAND B2B Toptan Otomasyon Sistemi")
-
-if 'sepet' not in st.session_state: st.session_state.sepet = []
-if 'son_satis_fisi' not in st.session_state: st.session_state.son_satis_fisi = None
-
-menu = {"Satış Ekranı": mod_satis_ekrani, "Stok Durumu": mod_stok_durumu, "Yeni Ürün Ekle": mod_yeni_urun, "Geçmiş Siparişler": mod_gecmis, "Ürün Düzenle / Sil": mod_urun_duzenle, "Müşteriler (CRM)": mod_crm, "Mağaza Ayarları": mod_ayarlar}
-
-st.sidebar.title("Yönetim Paneli")
-secilen_ekran = st.sidebar.selectbox("Gitmek İstediğiniz Ekranı Seçin", list(menu.keys()))
-
-st.sidebar.divider()
-st.sidebar.subheader("🎨 Görünüm Ayarları")
-# Kullanıcı temayı değiştirdiğinde session_state güncellenir ve sayfa yenilenir
-yeni_tema = st.sidebar.radio("Görünüm Modu Seçin:", ["Koyu (Dark)", "Açık (Light)"], index=0 if st.session_state.tema == 'Koyu (Dark)' else 1)
-if yeni_tema != st.session_state.tema:
-    st.session_state.tema = yeni_tema
-    st.rerun()
-
-# Seçili sayfayı çalıştır
-menu[secilen_ekran]()
+        c.execute("UPDATE urunler SET barkod=?, isim=?, seri_adedi
