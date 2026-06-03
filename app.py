@@ -169,16 +169,32 @@ def mod_stok_durumu():
                 conn.commit()
                 st.rerun() 
             
+            # --- YENİ EKLENTİ: METİNLİ (STİCKER) QR KOD ÜRETİCİ ---
             qr = qrcode.QRCode(version=1, box_size=10, border=2)
             qr.add_data(row['barkod'])
             qr.make(fit=True)
-            img_qr = qr.make_image(fill_color="black", back_color="white")
+            qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
+            
+            qr_w, qr_h = qr_img.size
+            etiket_img = Image.new('RGB', (qr_w, qr_h + 80), 'white')
+            etiket_img.paste(qr_img, (0, 0))
+            
+            draw = ImageDraw.Draw(etiket_img)
+            try:
+                font_isim = ImageFont.truetype("arialbd.ttf", 22)
+                font_kod = ImageFont.truetype("arial.ttf", 18)
+            except:
+                font_isim = font_kod = ImageFont.load_default()
+                
+            # QR kodun hemen altına model ismini ve barkod numarasını yazar
+            draw.text((25, qr_h + 5), f"{row['isim'][:25]}", fill="black", font=font_isim)
+            draw.text((25, qr_h + 35), f"KOD: {row['barkod']}", fill=(100,100,100), font=font_kod)
+            
             buf = io.BytesIO()
-            img_qr.save(buf, format="PNG")
+            etiket_img.save(buf, format="PNG")
             
-            st.download_button("🖨️ QR İndir", data=buf.getvalue(), file_name=f"QR_{row['barkod']}.png", mime="image/png", key=f"qr_dl_{row['id']}", use_container_width=True)
+            st.download_button("🖨️ QR İndir", data=buf.getvalue(), file_name=f"Etiket_{row['barkod']}.png", mime="image/png", key=f"qr_dl_{row['id']}", use_container_width=True)
             
-            # --- YENİ EKLENTİ: QR KODU İNDİRMEDEN DOĞRUDAN EKRANDA GÖSTERME ---
             with st.expander("👁️ QR Göster"):
                 st.image(buf.getvalue(), use_container_width=True)
             
@@ -289,10 +305,9 @@ def mod_satis_ekrani():
     if barkod:
         urun = c.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
         if urun:
-            # --- YENİ EKLENTİ: OKUNAN ÜRÜNÜN FOTOĞRAFINI GÖRSEL DOĞRULAMA İÇİN EKRANA YANSITMA ---
             sc1, sc2 = st.columns([1, 4])
             with sc1:
-                if urun[3]: # Eğer ürünün resmi varsa göster
+                if urun[3]: 
                     try:
                         st.image(urun[3], width=120)
                     except Exception:
