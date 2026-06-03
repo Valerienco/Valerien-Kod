@@ -10,7 +10,7 @@ import io
 import urllib.parse
 import json
 import pytesseract
-import qrcode  # YENİ: QR Kod Üretim Motoru
+import qrcode
 
 st.set_page_config(page_title="MIRROR BRAND Wholesale", layout="wide")
 
@@ -169,7 +169,6 @@ def mod_stok_durumu():
                 conn.commit()
                 st.rerun() 
             
-            # --- YENİ: SABİT QR KOD OLUŞTURUCU ---
             qr = qrcode.QRCode(version=1, box_size=10, border=2)
             qr.add_data(row['barkod'])
             qr.make(fit=True)
@@ -177,9 +176,12 @@ def mod_stok_durumu():
             buf = io.BytesIO()
             img_qr.save(buf, format="PNG")
             
-            st.download_button("🖨️ QR Kod İndir", data=buf.getvalue(), file_name=f"QR_{row['barkod']}.png", mime="image/png", key=f"qr_dl_{row['id']}", use_container_width=True)
+            st.download_button("🖨️ QR İndir", data=buf.getvalue(), file_name=f"QR_{row['barkod']}.png", mime="image/png", key=f"qr_dl_{row['id']}", use_container_width=True)
             
-        # --- SATIR İÇİ HIZLI DÜZENLEME PANELİ ---
+            # --- YENİ EKLENTİ: QR KODU İNDİRMEDEN DOĞRUDAN EKRANDA GÖSTERME ---
+            with st.expander("👁️ QR Göster"):
+                st.image(buf.getvalue(), use_container_width=True)
+            
         with st.expander("✏️ Bu Ürünü Hızlı Düzenle"):
             with st.form(key=f"hizli_edit_{row['id']}"):
                 e_isim = st.text_input("Ürün İsmi / Model Kodu", row['isim'])
@@ -287,10 +289,20 @@ def mod_satis_ekrani():
     if barkod:
         urun = c.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
         if urun:
-            st.info(f"**Okunan Ürün:** {urun[2]} | **Birim Fiyat:** {urun[6]} {urun[7]}")
-            if st.button("Satış Listesine / Sepete Ekle", use_container_width=True):
-                st.session_state.sepet.append({'id': urun[0], 'isim': urun[2], 'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]})
-                st.rerun()
+            # --- YENİ EKLENTİ: OKUNAN ÜRÜNÜN FOTOĞRAFINI GÖRSEL DOĞRULAMA İÇİN EKRANA YANSITMA ---
+            sc1, sc2 = st.columns([1, 4])
+            with sc1:
+                if urun[3]: # Eğer ürünün resmi varsa göster
+                    try:
+                        st.image(urun[3], width=120)
+                    except Exception:
+                        st.warning("Resim bulunamadı.")
+            
+            with sc2:
+                st.info(f"**Okunan Ürün:** {urun[2]} | **Birim Fiyat:** {urun[6]} {urun[7]}")
+                if st.button("Satış Listesine / Sepete Ekle", use_container_width=True):
+                    st.session_state.sepet.append({'id': urun[0], 'isim': urun[2], 'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]})
+                    st.rerun()
         else: 
             st.warning("Bu barkoda ait ürün bulunamadı.")
 
