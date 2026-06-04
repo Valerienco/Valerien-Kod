@@ -17,11 +17,11 @@ st.set_page_config(page_title="MIRROR BRAND B2B", layout="wide", initial_sidebar
 if not os.path.exists("urun_resimleri"):
     os.makedirs("urun_resimleri")
 
-# Ortak Lüks CSS (Grid ve Genel Hatlar İçin)
+# Ortak Lüks CSS (Yazıların ve ikonların birbirine girmemesi için revize edildi)
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&display=swap');
-    html, body, [class*="css"], .stApp, p, h1, h2, h3, h4, h5, h6, span, label {
+    html, body, [class*="css"], .stApp, p, h1, h2, h3, h4, h5, h6 {
         font-family: 'Montserrat', sans-serif !important;
     }
     .block-container { padding-top: 2rem !important; }
@@ -193,7 +193,6 @@ def mod_stok_durumu():
     if df.empty: 
         return st.info("Sistemde henüz ürün yok.")
         
-    # --- YENİ QoL: FİNANSAL DASHBOARD ---
     st.subheader("🏦 Depo Finansal Özeti")
     toplam_model = len(df)
     toplam_seri = df['stok_seri'].sum()
@@ -211,7 +210,6 @@ def mod_stok_durumu():
     d3.metric("💰 Tahmini Depo Değeri", f"{tahmini_usd_deger:,.2f} $")
     st.divider()
 
-    # --- YENİ QoL: ARAMA, KATEGORİ VE SIRALAMA PANELİ ---
     f1, f2, f3 = st.columns([2, 1, 1])
     arama = f1.text_input("🔍 Arama Yap (İsim veya Barkod)")
     kategoriler = ["Tüm Markalar"] + sorted(list(set([str(x).split()[0].upper() for x in df['isim'] if pd.notna(x) and str(x).strip() != ""])))
@@ -229,14 +227,13 @@ def mod_stok_durumu():
     st.write(f"**Gösterilen Model:** {len(df)}")
     st.divider()
 
-    # --- YENİ TASARIM: 3'LÜ GRID (IZGARA) VİTRİN SİSTEMİ ---
     for i in range(0, len(df), 3):
         cols = st.columns(3)
         for j in range(3):
             if i + j < len(df):
                 row = df.iloc[i+j]
                 with cols[j]:
-                    with st.container(border=True): # Şık çerçeve
+                    with st.container(border=True):
                         if row['resim_url']:
                             try: st.image(row['resim_url'], use_container_width=True)
                             except Exception: st.error("Resim bulunamadı.")
@@ -245,11 +242,9 @@ def mod_stok_durumu():
                         st.write(f"**Kod:** {row['barkod']}")
                         st.write(f"**Fiyat:** {row['fiyat']} {row['para_birimi']}")
                         
-                        # Kritik stok rozeti
                         stok_renk = "🔴 Kritik Stok" if row['stok_seri'] <= 2 else "🟢 Yeterli"
                         st.write(f"**Stok:** {row['stok_seri']} Seri ({stok_renk}) | **Seri İçi:** {row['seri_adedi']} Adet")
                         
-                        # --- HIZLI İŞLEMLER ---
                         bc1, bc2 = st.columns(2)
                         with bc1:
                             if st.button("🗑️ Sil", key=f"del_{row['id']}", use_container_width=True):
@@ -257,7 +252,6 @@ def mod_stok_durumu():
                                 conn.commit(); st.rerun()
                                 
                         with bc2:
-                            # QR Üretici
                             qr = qrcode.QRCode(version=1, box_size=10, border=2)
                             qr.add_data(row['barkod'])
                             qr.make(fit=True)
@@ -278,7 +272,6 @@ def mod_stok_durumu():
                         with st.expander("👁️ QR Göster"):
                             st.image(buf.getvalue(), use_container_width=True)
                             
-                        # Grid İçi Düzenleme Formu
                         with st.expander("✏️ Düzenle"):
                             with st.form(key=f"edit_{row['id']}"):
                                 e_isim = st.text_input("Model Kodu", row['isim'])
@@ -527,7 +520,7 @@ def mod_ayarlar():
 if 'sepet' not in st.session_state: st.session_state.sepet = []
 if 'son_satis_fisi' not in st.session_state: st.session_state.son_satis_fisi = None
 
-# İKONLU LÜKS MENÜ
+# GÖRSEL BUG'I ÇÖZEN AÇILIR MENÜ (SELECTBOX) YAPISI
 menu = {
     "🏠 Ana Sayfa (Kokpit)": mod_anasayfa,
     "🛒 Satış Ekranı": mod_satis_ekrani, 
@@ -539,8 +532,9 @@ menu = {
 }
 
 st.sidebar.title("Yönetim Paneli")
-secilen_ekran = st.sidebar.radio("", list(menu.keys()))
+secilen_ekran = st.sidebar.selectbox("Gideceğiniz Ekranı Seçin", list(menu.keys()))
 st.sidebar.divider()
+
 if os.path.exists("logo_sistem.png"):
     st.sidebar.image("logo_sistem.png", use_container_width=True)
 
