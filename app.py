@@ -17,7 +17,7 @@ st.set_page_config(page_title="MIRROR BRAND B2B", layout="wide", initial_sidebar
 if not os.path.exists("urun_resimleri"):
     os.makedirs("urun_resimleri")
 
-# Ortak Lüks CSS (Yazıların ve ikonların birbirine girmemesi için revize edildi)
+# Ortak Lüks CSS 
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&display=swap');
@@ -224,14 +224,33 @@ def mod_stok_durumu():
     elif siralama == "Stok (Azdan Çoğa)": df = df.sort_values(by='stok_seri')
     elif siralama == "Yeniden Eskiye": df = df.sort_values(by='id', ascending=False)
 
-    st.write(f"**Gösterilen Model:** {len(df)}")
+    # --- YENİ QoL: SAYFALAMA (PAGINATION) MANTIĞI ---
+    URUN_SAYISI_SAYFA = 24 # Her sayfada 8 satır x 3 kolon = 24 ürün
+    toplam_sayfa = max(1, (len(df) + URUN_SAYISI_SAYFA - 1) // URUN_SAYISI_SAYFA)
+    
+    st.write(f"**Bulunan Toplam Model:** {len(df)}")
+    
+    # Sayfa Seçim Kutusu (Ortalanmış ve dikkat çekici)
+    if toplam_sayfa > 1:
+        sayfa_kolonlari = st.columns([3, 2, 3])
+        with sayfa_kolonlari[1]:
+            aktif_sayfa = st.number_input(f"📄 Sayfa (1 - {toplam_sayfa})", min_value=1, max_value=toplam_sayfa, value=1, step=1)
+    else:
+        aktif_sayfa = 1
+        
     st.divider()
 
-    for i in range(0, len(df), 3):
+    # Sadece o sayfanın ürünlerini kırp (Dilimleme)
+    baslangic_index = (aktif_sayfa - 1) * URUN_SAYISI_SAYFA
+    bitis_index = baslangic_index + URUN_SAYISI_SAYFA
+    df_sayfa = df.iloc[baslangic_index:bitis_index].reset_index(drop=True)
+
+    # Seçilen sayfanın grid vitrinini oluştur
+    for i in range(0, len(df_sayfa), 3):
         cols = st.columns(3)
         for j in range(3):
-            if i + j < len(df):
-                row = df.iloc[i+j]
+            if i + j < len(df_sayfa):
+                row = df_sayfa.iloc[i+j]
                 with cols[j]:
                     with st.container(border=True):
                         if row['resim_url']:
@@ -520,7 +539,6 @@ def mod_ayarlar():
 if 'sepet' not in st.session_state: st.session_state.sepet = []
 if 'son_satis_fisi' not in st.session_state: st.session_state.son_satis_fisi = None
 
-# GÖRSEL BUG'I ÇÖZEN AÇILIR MENÜ (SELECTBOX) YAPISI
 menu = {
     "🏠 Ana Sayfa (Kokpit)": mod_anasayfa,
     "🛒 Satış Ekranı": mod_satis_ekrani, 
@@ -538,5 +556,4 @@ st.sidebar.divider()
 if os.path.exists("logo_sistem.png"):
     st.sidebar.image("logo_sistem.png", use_container_width=True)
 
-# Seçili sayfayı çalıştır
 menu[secilen_ekran]()
