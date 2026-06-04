@@ -12,34 +12,25 @@ import json
 import pytesseract
 import qrcode
 
-st.set_page_config(page_title="MIRROR BRAND Wholesale", layout="wide")
+st.set_page_config(page_title="MIRROR BRAND B2B", layout="wide", initial_sidebar_state="expanded")
 
-# Sistemde resimlerin tutulacağı ana klasörü oluşturuyoruz
 if not os.path.exists("urun_resimleri"):
     os.makedirs("urun_resimleri")
 
-# ==========================================
-# 0. SAĞ ÜST KÖŞE DARK MODE ANAHTARI
-# ==========================================
-c_baslik, c_tema = st.columns([8, 2])
-with c_tema:
-    dark_mode = st.toggle("🌙 Koyu Tema (Dark Mode)", value=False)
+# Ortak Lüks CSS (Grid ve Genel Hatlar İçin)
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&display=swap');
+    html, body, [class*="css"], .stApp, p, h1, h2, h3, h4, h5, h6, span, label {
+        font-family: 'Montserrat', sans-serif !important;
+    }
+    .block-container { padding-top: 2rem !important; }
+    div[data-testid="stAlert"] { border-radius: 0px !important; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    div.stButton > button:first-child { border-radius: 0px !important; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; transition: all 0.3s; }
+</style>
+""", unsafe_allow_html=True)
 
-if dark_mode:
-    st.markdown("""
-    <style>
-        [data-testid="stAppViewContainer"] { background-color: #121212 !important; }
-        [data-testid="stHeader"] { background-color: #121212 !important; }
-        [data-testid="stSidebar"] { background-color: #1a1a1a !important; }
-        h1, h2, h3, h4, h5, h6, p, label, span { color: #ffffff !important; }
-        .stTextInput input, .stNumberInput input, .stTextArea textarea { background-color: #2b2b2b !important; color: #ffffff !important; border: 1px solid #444 !important;}
-        div[data-baseweb="select"] > div { background-color: #2b2b2b !important; color: #ffffff !important; border: 1px solid #444 !important;}
-    </style>
-    """, unsafe_allow_html=True)
-
-with c_baslik:
-    st.title("📦 MIRROR BRAND B2B Toptan Otomasyon Sistemi")
-
+st.title("MIRROR BRAND B2B Toptan Otomasyon Merkezi")
 
 # ==========================================
 # 1. TEMEL FONKSİYONLAR VE VERİTABANI
@@ -140,99 +131,174 @@ def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items
     img.save(img_byte_arr, format='JPEG', quality=95)
     return img_byte_arr.getvalue()
 
+
 # ==========================================
 # 2. KOMPAKT SAYFA MODÜLLERİ
 # ==========================================
 
+def mod_anasayfa():
+    st.header("📊 Yönetim Paneli (Kokpit)")
+    
+    df_sip = pd.read_sql_query("SELECT * FROM siparis_gecmisi", conn)
+    df_urun = pd.read_sql_query("SELECT * FROM urunler", conn)
+    
+    if df_sip.empty:
+        st.info("Sistemde henüz satış verisi bulunmuyor. Satış yaptıkça grafikler burada oluşacaktır.")
+        return
+
+    # Yaklaşık USD Ciro Hesaplama
+    toplam_ciro_usd = 0
+    toplam_satilan_adet = df_sip['toplam_adet'].sum()
+    
+    for _, r in df_sip.iterrows():
+        tutar = r['toplam_tutar']
+        if "USD" in r['para_birimi']: toplam_ciro_usd += tutar
+        elif "EUR" in r['para_birimi'] and eur_kur > 0: toplam_ciro_usd += (tutar * eur_kur) / usd_kur
+        elif "TRY" in r['para_birimi'] and usd_kur > 0: toplam_ciro_usd += tutar / usd_kur
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("💰 Toplam Satış Hacmi (Tahmini)", f"{toplam_ciro_usd:,.2f} $")
+    m2.metric("📦 Toplam Satılan Adet", f"{toplam_satilan_adet} Pcs")
+    m3.metric("🤝 Toplam İşlem (Fiş)", f"{len(df_sip)} Sipariş")
+    
+    st.divider()
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("📈 Son 10 Siparişin Tutar Dağılımı")
+        son_siparisler = df_sip.tail(10).copy()
+        if not son_siparisler.empty:
+            st.bar_chart(data=son_siparisler, x='siparis_no', y='toplam_tutar', use_container_width=True)
+            
+    with c2:
+        st.subheader("🔥 En Çok Satılan Kalemler")
+        satilan_urunler = []
+        for urunler_json in df_sip['urun_ozeti']:
+            try:
+                items = json.loads(urunler_json)
+                for item in items:
+                    satilan_urunler.append({"Model": item['isim'], "Satılan Seri": item['seri_miktar']})
+            except: pass
+        
+        if satilan_urunler:
+            df_pop = pd.DataFrame(satilan_urunler).groupby('Model').sum().reset_index()
+            df_pop = df_pop.sort_values(by='Satılan Seri', ascending=False).head(5)
+            st.dataframe(df_pop, use_container_width=True, hide_index=True)
+
+
 def mod_stok_durumu():
-    st.header("Mevcut Toptan Stoklar")
+    st.header("Mevcut Toptan Stoklar (Grid Vitrin)")
     df = pd.read_sql_query("SELECT * FROM urunler", conn)
     
     if df.empty: 
-        st.info("Sistemde ürün yok.")
+        return st.info("Sistemde henüz ürün yok.")
         
-    for _, row in df.iterrows():
-        c1, c2, c3 = st.columns([1, 3, 1]) 
+    # --- YENİ QoL: FİNANSAL DASHBOARD ---
+    st.subheader("🏦 Depo Finansal Özeti")
+    toplam_model = len(df)
+    toplam_seri = df['stok_seri'].sum()
+    df['toplam_deger'] = df['seri_adedi'] * df['stok_seri'] * df['fiyat']
+    
+    tahmini_usd_deger = 0
+    for _, r in df.iterrows():
+        if "USD" in r['para_birimi']: tahmini_usd_deger += r['toplam_deger']
+        elif "EUR" in r['para_birimi'] and eur_kur > 0: tahmini_usd_deger += (r['toplam_deger'] * eur_kur) / usd_kur
+        elif "TRY" in r['para_birimi'] and usd_kur > 0: tahmini_usd_deger += r['toplam_deger'] / usd_kur
         
-        if row['resim_url']:
-            try:
-                c1.image(row['resim_url'], width=150)
-            except Exception as e:
-                c1.error("Resim yüklenemedi. Lütfen Hızlı Düzenle panelinden fotoğrafı yeniden seçin.")
-        
-        c2.write(f"### {row['isim']}\n**Barkod:** {row['barkod']} | **Seri İçi:** {row['seri_adedi']} Adet | **Stok:** {row['stok_seri']} Seri\n**Birim Fiyat:** {row['fiyat']} {row['para_birimi']}")
-        
-        # Sağ Taraf Butonları (Silme ve QR)
-        with c3:
-            if st.button("🗑️ Hızlı Sil", key=f"hizli_sil_{row['id']}", use_container_width=True):
-                c.execute("DELETE FROM urunler WHERE id=?", (row['id'],))
-                conn.commit()
-                st.rerun() 
-            
-            # --- YENİ EKLENTİ: METİNLİ (STİCKER) QR KOD ÜRETİCİ ---
-            qr = qrcode.QRCode(version=1, box_size=10, border=2)
-            qr.add_data(row['barkod'])
-            qr.make(fit=True)
-            qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
-            
-            qr_w, qr_h = qr_img.size
-            etiket_img = Image.new('RGB', (qr_w, qr_h + 80), 'white')
-            etiket_img.paste(qr_img, (0, 0))
-            
-            draw = ImageDraw.Draw(etiket_img)
-            try:
-                font_isim = ImageFont.truetype("arialbd.ttf", 22)
-                font_kod = ImageFont.truetype("arial.ttf", 18)
-            except:
-                font_isim = font_kod = ImageFont.load_default()
-                
-            # QR kodun hemen altına model ismini ve barkod numarasını yazar
-            draw.text((25, qr_h + 5), f"{row['isim'][:25]}", fill="black", font=font_isim)
-            draw.text((25, qr_h + 35), f"KOD: {row['barkod']}", fill=(100,100,100), font=font_kod)
-            
-            buf = io.BytesIO()
-            etiket_img.save(buf, format="PNG")
-            
-            st.download_button("🖨️ QR İndir", data=buf.getvalue(), file_name=f"Etiket_{row['barkod']}.png", mime="image/png", key=f"qr_dl_{row['id']}", use_container_width=True)
-            
-            with st.expander("👁️ QR Göster"):
-                st.image(buf.getvalue(), use_container_width=True)
-            
-        with st.expander("✏️ Bu Ürünü Hızlı Düzenle"):
-            with st.form(key=f"hizli_edit_{row['id']}"):
-                e_isim = st.text_input("Ürün İsmi / Model Kodu", row['isim'])
-                e_barkod = st.text_input("Barkod", row['barkod'])
-                
-                e_resim_dosyasi = st.file_uploader("📸 Yeni Fotoğraf Yükle (Mevcudu Değiştirmek İçin)", type=['png', 'jpg', 'jpeg'], key=f"up_{row['id']}")
-                
-                ec1, ec2 = st.columns(2)
-                
-                seriler = [4, 5, 6, 7, 8, 10, 12]
-                secili_seri = row['seri_adedi'] if row['seri_adedi'] in seriler else 4
-                e_seri = ec1.selectbox("Seri İçi Adet", seriler, index=seriler.index(secili_seri))
-                
-                e_stok = ec1.number_input("Güncel Stok (Seri)", value=int(row['stok_seri']))
-                e_fiyat = ec2.number_input("Birim Fiyat", value=float(row['fiyat']))
-                
-                paralar = ["USD ($)", "EUR (€)", "TRY (₺)"]
-                secili_para = row['para_birimi'] if row['para_birimi'] in paralar else "USD ($)"
-                e_para = ec2.selectbox("Para Birimi", paralar, index=paralar.index(secili_para))
-                
-                if st.form_submit_button("💾 Değişiklikleri Kaydet"):
-                    yeni_resim_yolu = row['resim_url'] 
-                    
-                    if e_resim_dosyasi is not None:
-                        yeni_resim_yolu = f"urun_resimleri/{e_barkod}.jpg"
-                        with open(yeni_resim_yolu, "wb") as f:
-                            f.write(e_resim_dosyasi.getbuffer())
-                    
-                    c.execute("UPDATE urunler SET barkod=?, isim=?, resim_url=?, seri_adedi=?, stok_seri=?, fiyat=?, para_birimi=? WHERE id=?", 
-                              (e_barkod, e_isim, yeni_resim_yolu, e_seri, e_stok, e_fiyat, e_para, row['id']))
-                    conn.commit()
-                    st.success("✅ Ürün başarıyla güncellendi!")
-                    st.rerun()
-                    
-        st.divider()
+    d1, d2, d3 = st.columns(3)
+    d1.metric("📦 Toplam Model", f"{toplam_model} Çeşit")
+    d2.metric("🔢 Toplam Stok", f"{toplam_seri} Seri")
+    d3.metric("💰 Tahmini Depo Değeri", f"{tahmini_usd_deger:,.2f} $")
+    st.divider()
+
+    # --- YENİ QoL: ARAMA, KATEGORİ VE SIRALAMA PANELİ ---
+    f1, f2, f3 = st.columns([2, 1, 1])
+    arama = f1.text_input("🔍 Arama Yap (İsim veya Barkod)")
+    kategoriler = ["Tüm Markalar"] + sorted(list(set([str(x).split()[0].upper() for x in df['isim'] if pd.notna(x) and str(x).strip() != ""])))
+    secili_kategori = f2.selectbox("🏷️ Kategori / Marka Seç", kategoriler)
+    siralama = f3.selectbox("↕️ Sıralama Ölçütü", ["Yeniden Eskiye", "Alfabetik (A-Z)", "Fiyat (Düşükten Yükseğe)", "Fiyat (Yüksekten Düşüğe)", "Stok (Azdan Çoğa)"])
+
+    if secili_kategori != "Tüm Markalar": df = df[df['isim'].str.upper().str.startswith(secili_kategori)]
+    if arama: df = df[df['isim'].str.contains(arama, case=False, na=False) | df['barkod'].str.contains(arama, case=False, na=False)]
+    if siralama == "Alfabetik (A-Z)": df = df.sort_values(by='isim')
+    elif siralama == "Fiyat (Düşükten Yükseğe)": df = df.sort_values(by='fiyat')
+    elif siralama == "Fiyat (Yüksekten Düşüğe)": df = df.sort_values(by='fiyat', ascending=False)
+    elif siralama == "Stok (Azdan Çoğa)": df = df.sort_values(by='stok_seri')
+    elif siralama == "Yeniden Eskiye": df = df.sort_values(by='id', ascending=False)
+
+    st.write(f"**Gösterilen Model:** {len(df)}")
+    st.divider()
+
+    # --- YENİ TASARIM: 3'LÜ GRID (IZGARA) VİTRİN SİSTEMİ ---
+    for i in range(0, len(df), 3):
+        cols = st.columns(3)
+        for j in range(3):
+            if i + j < len(df):
+                row = df.iloc[i+j]
+                with cols[j]:
+                    with st.container(border=True): # Şık çerçeve
+                        if row['resim_url']:
+                            try: st.image(row['resim_url'], use_container_width=True)
+                            except Exception: st.error("Resim bulunamadı.")
+                        
+                        st.subheader(row['isim'])
+                        st.write(f"**Kod:** {row['barkod']}")
+                        st.write(f"**Fiyat:** {row['fiyat']} {row['para_birimi']}")
+                        
+                        # Kritik stok rozeti
+                        stok_renk = "🔴 Kritik Stok" if row['stok_seri'] <= 2 else "🟢 Yeterli"
+                        st.write(f"**Stok:** {row['stok_seri']} Seri ({stok_renk}) | **Seri İçi:** {row['seri_adedi']} Adet")
+                        
+                        # --- HIZLI İŞLEMLER ---
+                        bc1, bc2 = st.columns(2)
+                        with bc1:
+                            if st.button("🗑️ Sil", key=f"del_{row['id']}", use_container_width=True):
+                                c.execute("DELETE FROM urunler WHERE id=?", (row['id'],))
+                                conn.commit(); st.rerun()
+                                
+                        with bc2:
+                            # QR Üretici
+                            qr = qrcode.QRCode(version=1, box_size=10, border=2)
+                            qr.add_data(row['barkod'])
+                            qr.make(fit=True)
+                            qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
+                            qr_w, qr_h = qr_img.size
+                            etiket_img = Image.new('RGB', (qr_w, qr_h + 80), 'white')
+                            etiket_img.paste(qr_img, (0, 0))
+                            draw = ImageDraw.Draw(etiket_img)
+                            try: font_isim = ImageFont.truetype("arialbd.ttf", 22); font_kod = ImageFont.truetype("arial.ttf", 18)
+                            except: font_isim = font_kod = ImageFont.load_default()
+                            draw.text((25, qr_h + 5), f"{row['isim'][:25]}", fill="black", font=font_isim)
+                            draw.text((25, qr_h + 35), f"KOD: {row['barkod']}", fill=(100,100,100), font=font_kod)
+                            buf = io.BytesIO()
+                            etiket_img.save(buf, format="PNG")
+                            
+                            st.download_button("🖨️ QR İndir", data=buf.getvalue(), file_name=f"Etiket_{row['barkod']}.png", mime="image/png", key=f"qrdl_{row['id']}", use_container_width=True)
+                        
+                        with st.expander("👁️ QR Göster"):
+                            st.image(buf.getvalue(), use_container_width=True)
+                            
+                        # Grid İçi Düzenleme Formu
+                        with st.expander("✏️ Düzenle"):
+                            with st.form(key=f"edit_{row['id']}"):
+                                e_isim = st.text_input("Model Kodu", row['isim'])
+                                e_barkod = st.text_input("Barkod", row['barkod'])
+                                e_resim_dosyasi = st.file_uploader("📸 Yeni Fotoğraf", type=['png', 'jpg', 'jpeg'], key=f"up_{row['id']}")
+                                
+                                seriler = [4, 5, 6, 7, 8, 10, 12]
+                                e_seri = st.selectbox("Seri İçi Adet", seriler, index=seriler.index(row['seri_adedi']) if row['seri_adedi'] in seriler else 0)
+                                e_stok = st.number_input("Güncel Stok", value=int(row['stok_seri']))
+                                e_fiyat = st.number_input("Birim Fiyat", value=float(row['fiyat']))
+                                paralar = ["USD ($)", "EUR (€)", "TRY (₺)"]
+                                e_para = st.selectbox("Para Birimi", paralar, index=paralar.index(row['para_birimi']) if row['para_birimi'] in paralar else 0)
+                                
+                                if st.form_submit_button("Kaydet"):
+                                    yeni_yol = row['resim_url'] 
+                                    if e_resim_dosyasi is not None:
+                                        yeni_yol = f"urun_resimleri/{e_barkod}.jpg"
+                                        with open(yeni_yol, "wb") as f: f.write(e_resim_dosyasi.getbuffer())
+                                    c.execute("UPDATE urunler SET barkod=?, isim=?, resim_url=?, seri_adedi=?, stok_seri=?, fiyat=?, para_birimi=? WHERE id=?", (e_barkod, e_isim, yeni_yol, e_seri, e_stok, e_fiyat, e_para, row['id']))
+                                    conn.commit(); st.success("Güncellendi!"); st.rerun()
 
 def mod_yeni_urun():
     st.header("Yeni Ürün Tanımla")
@@ -308,10 +374,8 @@ def mod_satis_ekrani():
             sc1, sc2 = st.columns([1, 4])
             with sc1:
                 if urun[3]: 
-                    try:
-                        st.image(urun[3], width=120)
-                    except Exception:
-                        st.warning("Resim bulunamadı.")
+                    try: st.image(urun[3], width=120)
+                    except Exception: st.warning("Resim bulunamadı.")
             
             with sc2:
                 st.info(f"**Okunan Ürün:** {urun[2]} | **Birim Fiyat:** {urun[6]} {urun[7]}")
@@ -417,26 +481,6 @@ def mod_gecmis():
         except json.JSONDecodeError:
             st.warning("⚠️ Bu sipariş eski bir formatla kaydedildiği için detayları görüntülenemiyor. İsterseniz yukarıdaki sil butonunu kullanarak bu kaydı temizleyebilirsiniz.")
 
-def mod_urun_duzenle():
-    st.header("Ürün Düzenle / Sil (Toplu Liste)")
-    urunler = c.execute("SELECT id, isim, barkod FROM urunler").fetchall()
-    if not urunler: return st.info("Sistemde kayıtlı ürün bulunmuyor.")
-    
-    sec = st.selectbox("Düzenlenecek Ürünü Seçin", {f"{u[1]} ({u[2]})": u[0] for u in urunler}.keys())
-    u_id = {f"{u[1]} ({u[2]})": u[0] for u in urunler}[sec]
-    urun = c.execute("SELECT * FROM urunler WHERE id=?", (u_id,)).fetchone()
-    
-    y_isim, y_barkod = st.text_input("Ürün İsmi / Model Kodu", urun[2]), st.text_input("Barkod Numarası", urun[1])
-    c1, c2 = st.columns(2)
-    y_seri, y_stok = c1.selectbox("Seri İçi Ürün Adedi", [4,5,6,7,8,10,12], index=[4,5,6,7,8,10,12].index(urun[4]) if urun[4] in [4,5,6,7,8,10,12] else 0), c1.number_input("Güncel Stok (Seri)", value=urun[5])
-    y_fiyat = c2.number_input("1 Adet Ürün Birim Fiyatı", value=float(urun[6]))
-    
-    if st.button("💾 Değişiklikleri Kaydet", use_container_width=True):
-        c.execute("UPDATE urunler SET barkod=?, isim=?, seri_adedi=?, stok_seri=?, fiyat=? WHERE id=?", (y_barkod, y_isim, y_seri, y_stok, y_fiyat, u_id))
-        conn.commit(); st.success("✅ Ürün kaydı başarıyla güncellendi!")
-    if st.button("❌ Ürünü Sistemden Tamamen Sil", use_container_width=True):
-        c.execute("DELETE FROM urunler WHERE id=?", (u_id,)); conn.commit(); st.error("🗑️ Ürün veritabanından silindi!"); st.rerun()
-
 def mod_crm():
     st.header("📇 Müşteri Veritabanı (CRM)")
     with st.form("yeni_m"):
@@ -478,10 +522,27 @@ def mod_ayarlar():
         if st.button("Mevcut Logoyu Sistemden Sil"): os.remove("logo_sistem.png"); st.rerun()
 
 # ==========================================
-# 3. ANA ARAYÜZ
+# 3. ANA ARAYÜZ VE MENÜ
 # ==========================================
 if 'sepet' not in st.session_state: st.session_state.sepet = []
 if 'son_satis_fisi' not in st.session_state: st.session_state.son_satis_fisi = None
 
-menu = {"Satış Ekranı": mod_satis_ekrani, "Stok Durumu": mod_stok_durumu, "Yeni Ürün Ekle": mod_yeni_urun, "Geçmiş Siparişler": mod_gecmis, "Ürün Düzenle / Sil": mod_urun_duzenle, "Müşteriler (CRM)": mod_crm, "Mağaza Ayarları": mod_ayarlar}
-menu[st.sidebar.selectbox("Gitmek İstediğiniz Ekranı Seçin", list(menu.keys()))]()
+# İKONLU LÜKS MENÜ
+menu = {
+    "🏠 Ana Sayfa (Kokpit)": mod_anasayfa,
+    "🛒 Satış Ekranı": mod_satis_ekrani, 
+    "📦 Stok Durumu (Vitrin)": mod_stok_durumu, 
+    "➕ Yeni Ürün Ekle": mod_yeni_urun, 
+    "📂 Geçmiş Siparişler": mod_gecmis, 
+    "📇 Müşteriler (CRM)": mod_crm, 
+    "⚙️ Mağaza Ayarları": mod_ayarlar
+}
+
+st.sidebar.title("Yönetim Paneli")
+secilen_ekran = st.sidebar.radio("", list(menu.keys()))
+st.sidebar.divider()
+if os.path.exists("logo_sistem.png"):
+    st.sidebar.image("logo_sistem.png", use_container_width=True)
+
+# Seçili sayfayı çalıştır
+menu[secilen_ekran]()
