@@ -146,7 +146,6 @@ def mod_anasayfa():
         st.info("Sistemde henüz satış verisi bulunmuyor. Satış yaptıkça grafikler burada oluşacaktır.")
         return
 
-    # Yaklaşık USD Ciro Hesaplama
     toplam_ciro_usd = 0
     toplam_satilan_adet = df_sip['toplam_adet'].sum()
     
@@ -224,13 +223,11 @@ def mod_stok_durumu():
     elif siralama == "Stok (Azdan Çoğa)": df = df.sort_values(by='stok_seri')
     elif siralama == "Yeniden Eskiye": df = df.sort_values(by='id', ascending=False)
 
-    # --- YENİ QoL: SAYFALAMA (PAGINATION) MANTIĞI ---
-    URUN_SAYISI_SAYFA = 24 # Her sayfada 8 satır x 3 kolon = 24 ürün
+    URUN_SAYISI_SAYFA = 24
     toplam_sayfa = max(1, (len(df) + URUN_SAYISI_SAYFA - 1) // URUN_SAYISI_SAYFA)
     
     st.write(f"**Bulunan Toplam Model:** {len(df)}")
     
-    # Sayfa Seçim Kutusu (Ortalanmış ve dikkat çekici)
     if toplam_sayfa > 1:
         sayfa_kolonlari = st.columns([3, 2, 3])
         with sayfa_kolonlari[1]:
@@ -240,12 +237,10 @@ def mod_stok_durumu():
         
     st.divider()
 
-    # Sadece o sayfanın ürünlerini kırp (Dilimleme)
     baslangic_index = (aktif_sayfa - 1) * URUN_SAYISI_SAYFA
     bitis_index = baslangic_index + URUN_SAYISI_SAYFA
     df_sayfa = df.iloc[baslangic_index:bitis_index].reset_index(drop=True)
 
-    # Seçilen sayfanın grid vitrinini oluştur
     for i in range(0, len(df_sayfa), 3):
         cols = st.columns(3)
         for j in range(3):
@@ -293,16 +288,17 @@ def mod_stok_durumu():
                             
                         with st.expander("✏️ Düzenle"):
                             with st.form(key=f"edit_{row['id']}"):
-                                e_isim = st.text_input("Model Kodu", row['isim'])
-                                e_barkod = st.text_input("Barkod", row['barkod'])
+                                # HER KUTUYA BENZERSİZ KİMLİK (KEY) EKLENDİ - KAYDETMEME SORUNU ÇÖZÜLDÜ
+                                e_isim = st.text_input("Model Kodu", row['isim'], key=f"isim_{row['id']}")
+                                e_barkod = st.text_input("Barkod", row['barkod'], key=f"barkod_{row['id']}")
                                 e_resim_dosyasi = st.file_uploader("📸 Yeni Fotoğraf", type=['png', 'jpg', 'jpeg'], key=f"up_{row['id']}")
                                 
                                 seriler = [4, 5, 6, 7, 8, 10, 12]
-                                e_seri = st.selectbox("Seri İçi Adet", seriler, index=seriler.index(row['seri_adedi']) if row['seri_adedi'] in seriler else 0)
-                                e_stok = st.number_input("Güncel Stok", value=int(row['stok_seri']))
-                                e_fiyat = st.number_input("Birim Fiyat", value=float(row['fiyat']))
+                                e_seri = st.selectbox("Seri İçi Adet", seriler, index=seriler.index(row['seri_adedi']) if row['seri_adedi'] in seriler else 0, key=f"seri_{row['id']}")
+                                e_stok = st.number_input("Güncel Stok", value=int(row['stok_seri']), key=f"stok_{row['id']}")
+                                e_fiyat = st.number_input("Birim Fiyat", value=float(row['fiyat']), key=f"fiyat_{row['id']}")
                                 paralar = ["USD ($)", "EUR (€)", "TRY (₺)"]
-                                e_para = st.selectbox("Para Birimi", paralar, index=paralar.index(row['para_birimi']) if row['para_birimi'] in paralar else 0)
+                                e_para = st.selectbox("Para Birimi", paralar, index=paralar.index(row['para_birimi']) if row['para_birimi'] in paralar else 0, key=f"para_{row['id']}")
                                 
                                 if st.form_submit_button("Kaydet"):
                                     yeni_yol = row['resim_url'] 
