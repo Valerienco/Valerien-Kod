@@ -261,8 +261,9 @@ def mod_stok_durumu():
                         
                         bc1, bc2 = st.columns(2)
                         with bc1:
+                            # HATA DÜZELTMESİ: Silme işleminde ID tam sayıya (int) zorlandı
                             if st.button("🗑️ Sil", key=f"del_{row['id']}", use_container_width=True):
-                                c.execute("DELETE FROM urunler WHERE id=?", (row['id'],))
+                                c.execute("DELETE FROM urunler WHERE id=?", (int(row['id']),))
                                 conn.commit(); st.rerun()
                                 
                         with bc2:
@@ -288,7 +289,6 @@ def mod_stok_durumu():
                             
                         with st.expander("✏️ Düzenle"):
                             with st.form(key=f"edit_{row['id']}"):
-                                # HER KUTUYA BENZERSİZ KİMLİK (KEY) EKLENDİ - KAYDETMEME SORUNU ÇÖZÜLDÜ
                                 e_isim = st.text_input("Model Kodu", row['isim'], key=f"isim_{row['id']}")
                                 e_barkod = st.text_input("Barkod", row['barkod'], key=f"barkod_{row['id']}")
                                 e_resim_dosyasi = st.file_uploader("📸 Yeni Fotoğraf", type=['png', 'jpg', 'jpeg'], key=f"up_{row['id']}")
@@ -305,8 +305,13 @@ def mod_stok_durumu():
                                     if e_resim_dosyasi is not None:
                                         yeni_yol = f"urun_resimleri/{e_barkod}.jpg"
                                         with open(yeni_yol, "wb") as f: f.write(e_resim_dosyasi.getbuffer())
-                                    c.execute("UPDATE urunler SET barkod=?, isim=?, resim_url=?, seri_adedi=?, stok_seri=?, fiyat=?, para_birimi=? WHERE id=?", (e_barkod, e_isim, yeni_yol, e_seri, e_stok, e_fiyat, e_para, row['id']))
-                                    conn.commit(); st.success("Güncellendi!"); st.rerun()
+                                    
+                                    # HATA DÜZELTMESİ: Veritabanı ID eşleştirmesi için int(row['id']) kullanıldı
+                                    c.execute("UPDATE urunler SET barkod=?, isim=?, resim_url=?, seri_adedi=?, stok_seri=?, fiyat=?, para_birimi=? WHERE id=?", 
+                                              (e_barkod, e_isim, yeni_yol, e_seri, e_stok, e_fiyat, e_para, int(row['id'])))
+                                    conn.commit()
+                                    st.success("Güncellendi!")
+                                    st.rerun()
 
 def mod_yeni_urun():
     st.header("Yeni Ürün Tanımla")
