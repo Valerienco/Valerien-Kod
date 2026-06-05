@@ -56,6 +56,75 @@ def init_db():
 
 conn, c = init_db()
 
+# --- TERMAL BARKOD YAZICI İÇİN PROFESYONEL ETİKET MOTORU ---
+def profesyonel_etiket_olustur(barkod, isim):
+    # 1. Yüksek Çözünürlüklü ve Hata Korumalı QR Kod
+    qr = qrcode.QRCode(
+        version=1, 
+        error_correction=qrcode.constants.ERROR_CORRECT_H, 
+        box_size=15, # Çözünürlüğü inanılmaz artırır
+        border=1
+    )
+    qr.add_data(barkod)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
+    qr_w, qr_h = qr_img.size
+    
+    # 2. Etiket Kanvası (Termal yazıcı oranlarına uygun, yüksek çözünürlüklü dikey)
+    etiket_w = qr_w + 120
+    etiket_h = qr_h + 280
+    etiket_img = Image.new('RGB', (etiket_w, etiket_h), 'white')
+    draw = ImageDraw.Draw(etiket_img)
+    
+    # 3. Akıllı Font Seçici (Sunucudaki profesyonel fontları arar, bulanıklığı önler)
+    font_paths = [
+        "arialbd.ttf", 
+        "arial.ttf", 
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"
+    ]
+    
+    f_mirror = f_isim = f_kod = None
+    for p in font_paths:
+        try:
+            f_mirror = ImageFont.truetype(p, 65)  # En üstteki MIRROR yazısı kocaman
+            f_isim = ImageFont.truetype(p, 42)    # Model adı
+            f_kod = ImageFont.truetype(p, 32)     # Barkod no
+            break
+        except:
+            continue
+            
+    if not f_mirror:
+        # Sunucuda hiçbir font yoksa en temel fonta döner (Bunu önlemek için sunucuya font kuracağız)
+        f_mirror = f_isim = f_kod = ImageFont.load_default()
+
+    # Metni Ortalamak İçin Yardımcı Araç
+    def metni_ortala(y_pos, metin, font, fill="black"):
+        try:
+            w = draw.textlength(metin, font=font)
+        except:
+            w = 100 # Eski kütüphaneler için yedek
+        x_pos = (etiket_w - w) / 2
+        draw.text((x_pos, y_pos), metin, fill=fill, font=font)
+
+    # 4. Tasarımı Çizme
+    # Üst Marka
+    metni_ortala(40, "M I R R O R", f_mirror)
+    
+    # Orta QR
+    etiket_img.paste(qr_img, ((etiket_w - qr_w) // 2, 130))
+    
+    # Alt Ürün Bilgileri (Uzun isimleri keser)
+    isim_temiz = isim[:25]
+    metni_ortala(130 + qr_h + 30, isim_temiz, f_isim)
+    metni_ortala(130 + qr_h + 90, f"KOD: {barkod}", f_kod, fill=(50, 50, 50))
+    
+    # 5. PNG Olarak Çıktı Alma
+    buf = io.BytesIO()
+    etiket_img.save(buf, format="PNG")
+    return buf.getvalue()
+
 # --- İNGİLİZCE JPEG İRSALİYE MOTORU ---
 def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items, currency, raw_total, discounted_total):
     img = Image.new('RGB', (800, 1000 + (len(cart_items) * 40)), color=(255, 255, 255))
@@ -184,7 +253,6 @@ def mod_anasayfa():
             df_pop = df_pop.sort_values(by='Satılan Seri', ascending=False).head(5)
             st.dataframe(df_pop, use_container_width=True, hide_index=True)
 
-
 def mod_stok_durumu():
     st.header("Mevcut Toptan Stoklar (Grid Vitrin)")
     df = pd.read_sql_query("SELECT * FROM urunler", conn)
@@ -261,31 +329,17 @@ def mod_stok_durumu():
                         
                         bc1, bc2 = st.columns(2)
                         with bc1:
-                            # HATA DÜZELTMESİ: Silme işleminde ID tam sayıya (int) zorlandı
                             if st.button("🗑️ Sil", key=f"del_{row['id']}", use_container_width=True):
                                 c.execute("DELETE FROM urunler WHERE id=?", (int(row['id']),))
                                 conn.commit(); st.rerun()
                                 
                         with bc2:
-                            qr = qrcode.QRCode(version=1, box_size=10, border=2)
-                            qr.add_data(row['barkod'])
-                            qr.make(fit=True)
-                            qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
-                            qr_w, qr_h = qr_img.size
-                            etiket_img = Image.new('RGB', (qr_w, qr_h + 80), 'white')
-                            etiket_img.paste(qr_img, (0, 0))
-                            draw = ImageDraw.Draw(etiket_img)
-                            try: font_isim = ImageFont.truetype("arialbd.ttf", 22); font_kod = ImageFont.truetype("arial.ttf", 18)
-                            except: font_isim = font_kod = ImageFont.load_default()
-                            draw.text((25, qr_h + 5), f"{row['isim'][:25]}", fill="black", font=font_isim)
-                            draw.text((25, qr_h + 35), f"KOD: {row['barkod']}", fill=(100,100,100), font=font_kod)
-                            buf = io.BytesIO()
-                            etiket_img.save(buf, format="PNG")
-                            
-                            st.download_button("🖨️ QR İndir", data=buf.getvalue(), file_name=f"Etiket_{row['barkod']}.png", mime="image/png", key=f"qrdl_{row['id']}", use_container_width=True)
+                            # --- YENİ ETİKET MOTORU ÇAĞRISI ---
+                            etiket_verisi = profesyonel_etiket_olustur(row['barkod'], row['isim'])
+                            st.download_button("🖨️ Etiket İndir", data=etiket_verisi, file_name=f"MIRROR_{row['barkod']}.png", mime="image/png", key=f"qrdl_{row['id']}", use_container_width=True)
                         
-                        with st.expander("👁️ QR Göster"):
-                            st.image(buf.getvalue(), use_container_width=True)
+                        with st.expander("👁️ Etiketi Göster"):
+                            st.image(etiket_verisi, use_container_width=True)
                             
                         with st.expander("✏️ Düzenle"):
                             with st.form(key=f"edit_{row['id']}"):
@@ -306,7 +360,6 @@ def mod_stok_durumu():
                                         yeni_yol = f"urun_resimleri/{e_barkod}.jpg"
                                         with open(yeni_yol, "wb") as f: f.write(e_resim_dosyasi.getbuffer())
                                     
-                                    # HATA DÜZELTMESİ: Veritabanı ID eşleştirmesi için int(row['id']) kullanıldı
                                     c.execute("UPDATE urunler SET barkod=?, isim=?, resim_url=?, seri_adedi=?, stok_seri=?, fiyat=?, para_birimi=? WHERE id=?", 
                                               (e_barkod, e_isim, yeni_yol, e_seri, e_stok, e_fiyat, e_para, int(row['id'])))
                                     conn.commit()
