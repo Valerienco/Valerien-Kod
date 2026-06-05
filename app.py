@@ -45,91 +45,76 @@ def kurlari_getir():
 
 usd_kur, eur_kur, _ = kurlari_getir()
 
-def init_db():
-    conn = sqlite3.connect('mirrorbrand_stok.db', check_same_thread=False)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS urunler (id INTEGER PRIMARY KEY, barkod TEXT, isim TEXT, resim_url TEXT, seri_adedi INTEGER, stok_seri INTEGER, fiyat REAL, para_birimi TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS musteriler (id INTEGER PRIMARY KEY, isim TEXT, telefon TEXT, adres TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS siparis_gecmisi (id INTEGER PRIMARY KEY, siparis_no TEXT, tarih TEXT, musteri TEXT, telefon TEXT, adres TEXT, urun_ozeti TEXT, toplam_adet INTEGER, toplam_tutar REAL, para_birimi TEXT)''')
+# HATA ÇÖZÜMÜ 1: Çoklu Kullanıcı Çökme Engeli (Timeout ve Bağımsız Bağlantı)
+def get_db_conn():
+    conn = sqlite3.connect('mirrorbrand_stok.db', check_same_thread=False, timeout=30.0)
+    conn.execute('''CREATE TABLE IF NOT EXISTS urunler (id INTEGER PRIMARY KEY, barkod TEXT, isim TEXT, resim_url TEXT, seri_adedi INTEGER, stok_seri INTEGER, fiyat REAL, para_birimi TEXT)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS musteriler (id INTEGER PRIMARY KEY, isim TEXT, telefon TEXT, adres TEXT)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS siparis_gecmisi (id INTEGER PRIMARY KEY, siparis_no TEXT, tarih TEXT, musteri TEXT, telefon TEXT, adres TEXT, urun_ozeti TEXT, toplam_adet INTEGER, toplam_tutar REAL, para_birimi TEXT)''')
     conn.commit()
-    return conn, c
+    return conn
 
-conn, c = init_db()
+conn = get_db_conn()
 
 # --- ARGOX OS-2130D TERMAL BARKOD YAZICI MOTORU ---
 def profesyonel_etiket_olustur(barkod, isim):
-    # 1. Argox 203 DPI İçin Yüksek Keskinlikte QR (Saf Siyah-Beyaz)
-    qr = qrcode.QRCode(
-        version=1, 
-        error_correction=qrcode.constants.ERROR_CORRECT_H, 
-        box_size=20, # Argox'un piksellerine tam oturması için büyütüldü
-        border=2     # Kenar kesilmelerini önlemek için güvenli bölge
-    )
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=20, border=2)
     qr.add_data(barkod)
     qr.make(fit=True)
     qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     qr_w, qr_h = qr_img.size
     
-    # 2. Etiket Kanvası (Ürün kodu kaldırıldığı için alt kısım daraltıldı)
     etiket_w = qr_w + 120
-    etiket_h = qr_h + 200 # Gereksiz boşluğu aldık
+    etiket_h = qr_h + 200 
     etiket_img = Image.new('RGB', (etiket_w, etiket_h), 'white')
     draw = ImageDraw.Draw(etiket_img)
     
-    # 3. Termal Uyumlu Kalın Font Seçici
-    font_paths = [
-        "arialbd.ttf", 
-        "arial.ttf", 
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"
-    ]
+    font_paths = ["arialbd.ttf", "arial.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf", "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"]
     
     f_mirror = f_isim = None
     for p in font_paths:
         try:
-            f_mirror = ImageFont.truetype(p, 75)  # Çok daha büyük ve kalın MIRROR
-            f_isim = ImageFont.truetype(p, 50)    # Model adı
+            f_mirror = ImageFont.truetype(p, 75)
+            f_isim = ImageFont.truetype(p, 50)
             break
-        except:
-            continue
+        except: continue
             
-    if not f_mirror:
-        f_mirror = f_isim = ImageFont.load_default()
+    if not f_mirror: f_mirror = f_isim = ImageFont.load_default()
 
     def metni_ortala(y_pos, metin, font, fill="black"):
-        try:
-            w = draw.textlength(metin, font=font)
-        except:
-            w = 100 
+        try: w = draw.textlength(metin, font=font)
+        except: w = 100 
         x_pos = (etiket_w - w) / 2
         draw.text((x_pos, y_pos), metin, fill=fill, font=font)
 
-    # 4. Argox Optimizasyonlu Çizim (Gri renk yasak, her şey SAF SİYAH)
     metni_ortala(30, "M I R R O R", f_mirror, fill="black")
-    
     etiket_img.paste(qr_img, ((etiket_w - qr_w) // 2, 130))
-    
     isim_temiz = isim[:25]
     metni_ortala(130 + qr_h + 20, isim_temiz, f_isim, fill="black")
-    # KOD: {barkod} kısmı tamamen kaldırıldı
     
     buf = io.BytesIO()
     etiket_img.save(buf, format="PNG")
     return buf.getvalue()
 
-# --- İNGİLİZCE JPEG İRSALİYE MOTORU ---
+# --- HATA ÇÖZÜMÜ 3: BÜYÜTÜLMÜŞ İNGİLİZCE JPEG İRSALİYE MOTORU ---
 def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items, currency, raw_total, discounted_total):
-    img = Image.new('RGB', (800, 1000 + (len(cart_items) * 40)), color=(255, 255, 255))
+    img = Image.new('RGB', (850, 1100 + (len(cart_items) * 45)), color=(255, 255, 255))
     draw = ImageDraw.Draw(img)
-    try:
-        f_title = ImageFont.truetype("arialbd.ttf", 36)
-        f_bold = ImageFont.truetype("arialbd.ttf", 20)
-        f_norm = ImageFont.truetype("arial.ttf", 20)
-        f_total = ImageFont.truetype("arialbd.ttf", 26)
-        f_net = ImageFont.truetype("arialbd.ttf", 34)
-    except:
-        f_title = f_bold = f_norm = f_total = f_net = ImageFont.load_default()
+    
+    # Fontları %40 büyüttük ve kalınlaştırdık
+    font_paths = ["arialbd.ttf", "arial.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"]
+    f_title = f_bold = f_norm = f_net = None
+    for p in font_paths:
+        try:
+            f_title = ImageFont.truetype(p, 50)
+            f_bold = ImageFont.truetype(p, 26)
+            f_norm = ImageFont.truetype(p, 24)
+            f_net = ImageFont.truetype(p, 42)
+            break
+        except: pass
+        
+    if not f_title:
+        f_title = f_bold = f_norm = f_net = ImageFont.load_default()
 
     y = 50
     if os.path.exists("logo_sistem.png"):
@@ -137,56 +122,57 @@ def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items
             logo = Image.open("logo_sistem.png"); logo.thumbnail((250, 150)); img.paste(logo, (50, y)); y += logo.height + 40
         except: pass
 
-    draw.text((50, y), "SALES ORDER RECEIPT", fill=(0,0,0), font=f_title); y += 45
-    draw.text((50, y), "MIRROR BRAND WHOLESALE", fill=(100,100,100), font=f_bold); y += 30
-    draw.text((50, y), "WhatsApp: +90 (533) 577 72 92", fill=(37, 211, 102), font=f_bold); y += 40
-    draw.line((50, y, 750, y), fill=(0,0,0), width=3); y += 20
+    # Alt satıra geçiş (y) boşluklarını artırdık
+    draw.text((50, y), "SALES ORDER RECEIPT", fill=(0,0,0), font=f_title); y += 60
+    draw.text((50, y), "MIRROR BRAND WHOLESALE", fill=(100,100,100), font=f_bold); y += 35
+    draw.text((50, y), "WhatsApp: +90 (533) 577 72 92", fill=(37, 211, 102), font=f_bold); y += 45
+    draw.line((50, y, 800, y), fill=(0,0,0), width=3); y += 25
     
-    draw.text((50, y), "TYPE", fill=(100,100,100), font=f_bold); draw.text((200, y), f": SALES RECEIPT", fill=(0,0,0), font=f_bold); y += 30
-    draw.text((50, y), "ORDER NO", fill=(100,100,100), font=f_bold); draw.text((200, y), f": {order_no}", fill=(0,0,0), font=f_bold); y += 30
-    draw.text((50, y), "DATE", fill=(100,100,100), font=f_bold); draw.text((200, y), f": {date_str}", fill=(0,0,0), font=f_bold); y += 30
-    draw.text((50, y), "CUSTOMER", fill=(100,100,100), font=f_bold); draw.text((200, y), f": {customer}", fill=(0,0,0), font=f_bold); y += 30
+    draw.text((50, y), "TYPE", fill=(100,100,100), font=f_bold); draw.text((220, y), f": SALES RECEIPT", fill=(0,0,0), font=f_bold); y += 35
+    draw.text((50, y), "ORDER NO", fill=(100,100,100), font=f_bold); draw.text((220, y), f": {order_no}", fill=(0,0,0), font=f_bold); y += 35
+    draw.text((50, y), "DATE", fill=(100,100,100), font=f_bold); draw.text((220, y), f": {date_str}", fill=(0,0,0), font=f_bold); y += 35
+    draw.text((50, y), "CUSTOMER", fill=(100,100,100), font=f_bold); draw.text((220, y), f": {customer}", fill=(0,0,0), font=f_bold); y += 35
     if phone:
-        draw.text((50, y), "PHONE", fill=(100,100,100), font=f_bold); draw.text((200, y), f": {phone}", fill=(0,0,0), font=f_bold); y += 30
+        draw.text((50, y), "PHONE", fill=(100,100,100), font=f_bold); draw.text((220, y), f": {phone}", fill=(0,0,0), font=f_bold); y += 35
     
-    y += 20; draw.line((50, y, 750, y), fill=(0,0,0), width=3); y += 20
+    y += 20; draw.line((50, y, 800, y), fill=(0,0,0), width=3); y += 25
 
     sym = "$" if "USD" in currency else ("€" if "EUR" in currency else ("₺" if "TRY" in currency else currency))
 
     draw.text((50, y), "Series", fill=(0,0,0), font=f_bold)
-    draw.text((150, y), "Model", fill=(0,0,0), font=f_bold)
-    draw.text((470, y), "Pcs", fill=(0,0,0), font=f_bold)
-    draw.text((540, y), "Price", fill=(0,0,0), font=f_bold)
-    draw.text((660, y), "Total", fill=(0,0,0), font=f_bold); y += 30
-    draw.line((50, y, 750, y), fill=(200,200,200), width=2); y += 20
+    draw.text((160, y), "Model", fill=(0,0,0), font=f_bold)
+    draw.text((500, y), "Pcs", fill=(0,0,0), font=f_bold)
+    draw.text((580, y), "Price", fill=(0,0,0), font=f_bold)
+    draw.text((700, y), "Total", fill=(0,0,0), font=f_bold); y += 35
+    draw.line((50, y, 800, y), fill=(200,200,200), width=2); y += 25
     
     grand_pcs = 0
     for item in cart_items:
         draw.text((50, y), f"{item['seri_miktar']}", fill=(0,0,0), font=f_norm)
-        draw.text((150, y), f"{item['isim'][:28]}", fill=(0,0,0), font=f_norm)
-        draw.text((470, y), f"{item['pcs']}", fill=(0,0,0), font=f_norm)
-        draw.text((540, y), f"{item['birim_fiyat']:.2f}", fill=(0,0,0), font=f_norm)
-        draw.text((660, y), f"{item['line_total']:.2f}", fill=(0,0,0), font=f_norm)
-        grand_pcs += item['pcs']; y += 40
+        draw.text((160, y), f"{item['isim'][:25]}", fill=(0,0,0), font=f_norm)
+        draw.text((500, y), f"{item['pcs']}", fill=(0,0,0), font=f_norm)
+        draw.text((580, y), f"{item['birim_fiyat']:.2f}", fill=(0,0,0), font=f_norm)
+        draw.text((700, y), f"{item['line_total']:.2f}", fill=(0,0,0), font=f_norm)
+        grand_pcs += item['pcs']; y += 45
     
-    y += 10; draw.line((50, y, 750, y), fill=(0,0,0), width=3); y += 20
+    y += 10; draw.line((50, y, 800, y), fill=(0,0,0), width=3); y += 25
 
-    draw.text((350, y), "TOTAL PCS", fill=(100,100,100), font=f_bold); draw.text((550, y), f": {grand_pcs}", fill=(0,0,0), font=f_bold); y += 35
-    draw.text((350, y), "TOTAL", fill=(100,100,100), font=f_bold); draw.text((550, y), f": {raw_total:.2f} {sym}", fill=(0,0,0), font=f_bold); y += 40
+    draw.text((380, y), "TOTAL PCS", fill=(100,100,100), font=f_bold); draw.text((580, y), f": {grand_pcs}", fill=(0,0,0), font=f_bold); y += 40
+    draw.text((380, y), "TOTAL", fill=(100,100,100), font=f_bold); draw.text((580, y), f": {raw_total:.2f} {sym}", fill=(0,0,0), font=f_bold); y += 45
     
-    draw.line((350, y, 750, y), fill=(200,200,200), width=2); y += 20
-    draw.text((350, y), "NET TOTAL", fill=(0,0,0), font=f_net); draw.text((550, y), f": {discounted_total:.2f} {sym}", fill=(34,139,34), font=f_net); y += 55
+    draw.line((380, y, 800, y), fill=(200,200,200), width=2); y += 25
+    draw.text((380, y), "NET TOTAL", fill=(0,0,0), font=f_net); draw.text((580, y), f": {discounted_total:.2f} {sym}", fill=(34,139,34), font=f_net); y += 65
     
     eq_try, eq_usd, eq_eur = 0, 0, 0
     if "USD" in currency: eq_usd = discounted_total; eq_try = discounted_total * usd_kur; eq_eur = eq_try / eur_kur if eur_kur > 0 else 0
     elif "EUR" in currency: eq_eur = discounted_total; eq_try = discounted_total * eur_kur; eq_usd = eq_try / usd_kur if usd_kur > 0 else 0
     else: eq_try = discounted_total; eq_usd = discounted_total / usd_kur if usd_kur > 0 else 0; eq_eur = discounted_total / eur_kur if eur_kur > 0 else 0
 
-    draw.text((350, y), f"Eq USD: {eq_usd:.2f} $", fill=(120,120,120), font=f_norm); y += 28
-    draw.text((350, y), f"Eq EUR: {eq_eur:.2f} €", fill=(120,120,120), font=f_norm); y += 28
-    draw.text((350, y), f"Eq TRY: {eq_try:.2f} ₺", fill=(120,120,120), font=f_norm); y += 60
+    draw.text((380, y), f"Eq USD: {eq_usd:.2f} $", fill=(120,120,120), font=f_norm); y += 35
+    draw.text((380, y), f"Eq EUR: {eq_eur:.2f} €", fill=(120,120,120), font=f_norm); y += 35
+    draw.text((380, y), f"Eq TRY: {eq_try:.2f} ₺", fill=(120,120,120), font=f_norm); y += 70
     
-    draw.text((50, y), "Information Receipt. Not a Financial Document.", fill=(160,160,160), font=f_norm); y += 25
+    draw.text((50, y), "Information Receipt. Not a Financial Document.", fill=(160,160,160), font=f_norm); y += 30
     draw.text((50, y), "Bilgi Fisidir. Mali Degeri Yoktur.", fill=(160,160,160), font=f_norm)
 
     img_byte_arr = io.BytesIO()
@@ -323,11 +309,10 @@ def mod_stok_durumu():
                         bc1, bc2 = st.columns(2)
                         with bc1:
                             if st.button("🗑️ Sil", key=f"del_{row['id']}", use_container_width=True):
-                                c.execute("DELETE FROM urunler WHERE id=?", (int(row['id']),))
+                                conn.execute("DELETE FROM urunler WHERE id=?", (int(row['id']),))
                                 conn.commit(); st.rerun()
                                 
                         with bc2:
-                            # --- YENİ ETİKET MOTORU ÇAĞRISI ---
                             etiket_verisi = profesyonel_etiket_olustur(row['barkod'], row['isim'])
                             st.download_button("🖨️ Etiket İndir", data=etiket_verisi, file_name=f"MIRROR_{row['barkod']}.png", mime="image/png", key=f"qrdl_{row['id']}", use_container_width=True)
                         
@@ -349,11 +334,16 @@ def mod_stok_durumu():
                                 
                                 if st.form_submit_button("Kaydet"):
                                     yeni_yol = row['resim_url'] 
+                                    
+                                    # HATA ÇÖZÜMÜ 2: Fotoğraf Sıkıştırma (Hızlandırma)
                                     if e_resim_dosyasi is not None:
                                         yeni_yol = f"urun_resimleri/{e_barkod}.jpg"
-                                        with open(yeni_yol, "wb") as f: f.write(e_resim_dosyasi.getbuffer())
+                                        img_up = Image.open(e_resim_dosyasi)
+                                        if img_up.mode in ("RGBA", "P"): img_up = img_up.convert("RGB")
+                                        img_up.thumbnail((800, 800)) # Fotoğrafı anında küçültür
+                                        img_up.save(yeni_yol, "JPEG", optimize=True, quality=85)
                                     
-                                    c.execute("UPDATE urunler SET barkod=?, isim=?, resim_url=?, seri_adedi=?, stok_seri=?, fiyat=?, para_birimi=? WHERE id=?", 
+                                    conn.execute("UPDATE urunler SET barkod=?, isim=?, resim_url=?, seri_adedi=?, stok_seri=?, fiyat=?, para_birimi=? WHERE id=?", 
                                               (e_barkod, e_isim, yeni_yol, e_seri, e_stok, e_fiyat, e_para, int(row['id'])))
                                     conn.commit()
                                     st.success("Güncellendi!")
@@ -364,7 +354,6 @@ def mod_yeni_urun():
     with st.form("urun_ekle"):
         isim = st.text_input("Ürün İsmi / Model Kodu")
         barkod = st.text_input("Barkod")
-        
         resim_dosyasi = st.file_uploader("📸 Ürün Fotoğrafı Yükle (Zorunlu Değil, Tıklayıp Seçin)", type=['png', 'jpg', 'jpeg'])
         
         c1, c2 = st.columns(2)
@@ -372,18 +361,20 @@ def mod_yeni_urun():
         para, fiyat = c2.selectbox("Para Birimi", ["USD ($)", "EUR (€)", "TRY (₺)"]), c2.number_input("Birim Fiyat (1 Adet Ürün Fiyatı)", min_value=0.0)
         
         if st.form_submit_button("Kaydet") and barkod and isim:
-            mevcut_urun = c.execute("SELECT id FROM urunler WHERE barkod=?", (barkod,)).fetchone()
-            
+            mevcut_urun = conn.execute("SELECT id FROM urunler WHERE barkod=?", (barkod,)).fetchone()
             if mevcut_urun:
                 st.error("⚠️ Hata: Bu barkod / model koduna sahip bir ürün zaten var! Aynı barkodu iki kez ekleyemezsiniz.")
             else:
                 kaydedilecek_resim_yolu = ""
+                # HATA ÇÖZÜMÜ 2: Fotoğraf Sıkıştırma (Hızlandırma)
                 if resim_dosyasi is not None:
                     kaydedilecek_resim_yolu = f"urun_resimleri/{barkod}.jpg"
-                    with open(kaydedilecek_resim_yolu, "wb") as f:
-                        f.write(resim_dosyasi.getbuffer())
+                    img_up = Image.open(resim_dosyasi)
+                    if img_up.mode in ("RGBA", "P"): img_up = img_up.convert("RGB")
+                    img_up.thumbnail((800, 800))
+                    img_up.save(kaydedilecek_resim_yolu, "JPEG", optimize=True, quality=85)
                 
-                c.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod, isim, kaydedilecek_resim_yolu, seri_adedi, stok, fiyat, para))
+                conn.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod, isim, kaydedilecek_resim_yolu, seri_adedi, stok, fiyat, para))
                 conn.commit()
                 st.success("✅ Ürün başarıyla eklendi!")
 
@@ -403,16 +394,12 @@ def mod_satis_ekrani():
     
     if okuma_secenegi == "Klavyeden Elle Gir / Bluetooth Tabanca":
         barkod = st.text_input("✍️ Ürün Kodunu Girip Enter'a Basın")
-        
     elif okuma_secenegi == "Barkod / Karekod Oku":
         kamera = st.camera_input("📷 Çizgili Barkod / Karekod Okut")
         if kamera:
             decoded = decode(Image.open(kamera))
-            if decoded:
-                barkod = decoded[0].data.decode()
-            else:
-                st.warning("Barkod okunamadı.")
-                
+            if decoded: barkod = decoded[0].data.decode()
+            else: st.warning("Barkod okunamadı.")
     elif okuma_secenegi == "Düz Yazı Oku (OCR)":
         st.info("Kamerayı ürün kodunun tam karşısında tutun. Sadece orta yatay alan okunur.")
         kamera_ocr = st.camera_input("📷 Ürün Kodunun Fotoğrafını Çekin")
@@ -422,20 +409,17 @@ def mod_satis_ekrani():
             kirpilmis_img = img.crop((0, yukseklik * 0.35, genislik, yukseklik * 0.65))
             st.image(kirpilmis_img, caption="Okunan Yatay Alan")
             okunan_metin = pytesseract.image_to_string(kirpilmis_img).strip()
-            if okunan_metin:
-                barkod = okunan_metin
-            else:
-                st.error("Yazı okunamadı. Lütfen tam ortalayıp tekrar çekin.")
+            if okunan_metin: barkod = okunan_metin
+            else: st.error("Yazı okunamadı. Lütfen tam ortalayıp tekrar çekin.")
 
     if barkod:
-        urun = c.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
+        urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
         if urun:
             sc1, sc2 = st.columns([1, 4])
             with sc1:
                 if urun[3]: 
                     try: st.image(urun[3], width=120)
                     except Exception: st.warning("Resim bulunamadı.")
-            
             with sc2:
                 st.info(f"**Okunan Ürün:** {urun[2]} | **Birim Fiyat:** {urun[6]} {urun[7]}")
                 if st.button("Satış Listesine / Sepete Ekle", use_container_width=True):
@@ -459,7 +443,7 @@ def mod_satis_ekrani():
 
     st.divider()
     st.subheader("💳 Satışı Tamamla ve Müşteri Seçimi")
-    musteriler = c.execute("SELECT isim, telefon, adres FROM musteriler").fetchall()
+    musteriler = conn.execute("SELECT isim, telefon, adres FROM musteriler").fetchall()
     secilen = st.selectbox("Müşteri Seçin", ["+ Yeni Müşteri Kaydet"] + [m[0] for m in musteriler])
     
     with st.form("checkout"):
@@ -474,7 +458,7 @@ def mod_satis_ekrani():
         indirim = st.number_input("Ekstra Uygulanacak Gizli İndirim (%)", 0, 100, 0)
         
         if st.form_submit_button("Satışı Onayla ve İrsaliye Çıkar") and m_isim:
-            if secilen == "+ Yeni Müşteri Kaydet": c.execute("INSERT INTO musteriler (isim, telefon, adres) VALUES (?,?,?)", (m_isim, m_tel, m_adres))
+            if secilen == "+ Yeni Müşteri Kaydet": conn.execute("INSERT INTO musteriler (isim, telefon, adres) VALUES (?,?,?)", (m_isim, m_tel, m_adres))
             
             raw_total = sum([i['line_total'] for i in st.session_state.sepet])
             discounted_total = raw_total * ((100 - indirim) / 100)
@@ -482,11 +466,11 @@ def mod_satis_ekrani():
             p_birim = st.session_state.sepet[0]['para_birimi']
             sip_no, tarih = f"ORD-{datetime.now().strftime('%Y%m%d%H%M')}", datetime.now().strftime('%d/%m/%Y %H:%M')
             
-            for i in st.session_state.sepet: c.execute("UPDATE urunler SET stok_seri=stok_seri-? WHERE id=?", (i['seri_miktar'], i['id']))
+            for i in st.session_state.sepet: conn.execute("UPDATE urunler SET stok_seri=stok_seri-? WHERE id=?", (i['seri_miktar'], i['id']))
             
             sepet_json = json.dumps(st.session_state.sepet)
             
-            c.execute("INSERT INTO siparis_gecmisi (siparis_no, tarih, musteri, telefon, adres, urun_ozeti, toplam_adet, toplam_tutar, para_birimi) VALUES (?,?,?,?,?,?,?,?,?)",
+            conn.execute("INSERT INTO siparis_gecmisi (siparis_no, tarih, musteri, telefon, adres, urun_ozeti, toplam_adet, toplam_tutar, para_birimi) VALUES (?,?,?,?,?,?,?,?,?)",
                       (sip_no, tarih, m_isim, m_tel, m_adres, sepet_json, t_adet, discounted_total, p_birim))
             conn.commit()
 
@@ -509,7 +493,7 @@ def mod_gecmis():
     st.divider()
     
     st.subheader("🔍 Sipariş İşlemleri (İncele veya Sil)")
-    siparisler = c.execute("SELECT * FROM siparis_gecmisi ORDER BY id DESC").fetchall()
+    siparisler = conn.execute("SELECT * FROM siparis_gecmisi ORDER BY id DESC").fetchall()
     sec_etiket = st.selectbox("İşlem Yapmak İstediğiniz Siparişi Seçin", [f"{s[1]} - {s[3]} ({s[2]})" for s in siparisler])
     
     if sec_etiket:
@@ -517,7 +501,7 @@ def mod_gecmis():
         siparis_id = s[0]
         
         if st.button("❌ Bu Siparişi Arşivden Tamamen Sil", use_container_width=True):
-            c.execute("DELETE FROM siparis_gecmisi WHERE id=?", (siparis_id,))
+            conn.execute("DELETE FROM siparis_gecmisi WHERE id=?", (siparis_id,))
             conn.commit()
             st.error("🗑️ Sipariş arşivden başarıyla silindi!")
             st.rerun()
@@ -538,25 +522,25 @@ def mod_gecmis():
                 st.download_button("📥 Bu Fişi İndir", jpeg_re, f"Re_{s[1]}.jpg", "image/jpeg", use_container_width=True)
                 
         except json.JSONDecodeError:
-            st.warning("⚠️ Bu sipariş eski bir formatla kaydedildiği için detayları görüntülenemiyor. İsterseniz yukarıdaki sil butonunu kullanarak bu kaydı temizleyebilirsiniz.")
+            st.warning("⚠️ Bu sipariş eski formatta olduğu için detaylar yüklenemiyor.")
 
 def mod_crm():
     st.header("📇 Müşteri Veritabanı (CRM)")
     with st.form("yeni_m"):
         isim, tel, adres = st.text_input("Müşteri / Firma Adı*"), st.text_input("Telefon Numarası"), st.text_area("Adres")
         if st.form_submit_button("Müşteriyi Veritabanına Kaydet") and isim:
-            c.execute("INSERT INTO musteriler (isim, telefon, adres) VALUES (?,?,?)", (isim, tel, adres))
+            conn.execute("INSERT INTO musteriler (isim, telefon, adres) VALUES (?,?,?)", (isim, tel, adres))
             conn.commit(); st.success("✅ Müşteri rehbere eklendi!"); st.rerun()
     st.divider()
     
     st.subheader("📋 Kayıtlı Müşterileri Düzenle / Sil")
-    musteriler = c.execute("SELECT id, isim, telefon, adres FROM musteriler").fetchall()
+    musteriler = conn.execute("SELECT id, isim, telefon, adres FROM musteriler").fetchall()
     if not musteriler:
         st.info("Sistemde kayıtlı müşteri bulunmuyor.")
     else:
         sec = st.selectbox("İşlem Yapılacak Müşteriyi Seçin", {f"{m[1]} ({m[2]})": m[0] for m in musteriler}.keys())
         m_id = {f"{m[1]} ({m[2]})": m[0] for m in musteriler}[sec]
-        sec_m = c.execute("SELECT * FROM musteriler WHERE id=?", (m_id,)).fetchone()
+        sec_m = conn.execute("SELECT * FROM musteriler WHERE id=?", (m_id,)).fetchone()
         
         y_isim = st.text_input("Müşteri / Firma Adı", sec_m[1])
         y_tel = st.text_input("Telefon Numarası", sec_m[2])
@@ -564,10 +548,10 @@ def mod_crm():
         
         c1, c2 = st.columns(2)
         if c1.button("💾 Değişiklikleri Kaydet", use_container_width=True):
-            c.execute("UPDATE musteriler SET isim=?, telefon=?, adres=? WHERE id=?", (y_isim, y_tel, y_adres, m_id))
+            conn.execute("UPDATE musteriler SET isim=?, telefon=?, adres=? WHERE id=?", (y_isim, y_tel, y_adres, m_id))
             conn.commit(); st.success("✅ Müşteri başarıyla güncellendi!"); st.rerun()
         if c2.button("❌ Müşteriyi Sistemden Sil", use_container_width=True):
-            c.execute("DELETE FROM musteriler WHERE id=?", (m_id,))
+            conn.execute("DELETE FROM musteriler WHERE id=?", (m_id,))
             conn.commit(); st.error("🗑️ Müşteri silindi!"); st.rerun()
 
 def mod_ayarlar():
