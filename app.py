@@ -56,27 +56,27 @@ def init_db():
 
 conn, c = init_db()
 
-# --- TERMAL BARKOD YAZICI İÇİN PROFESYONEL ETİKET MOTORU ---
+# --- ARGOX OS-2130D TERMAL BARKOD YAZICI MOTORU ---
 def profesyonel_etiket_olustur(barkod, isim):
-    # 1. Yüksek Çözünürlüklü ve Hata Korumalı QR Kod
+    # 1. Argox 203 DPI İçin Yüksek Keskinlikte QR (Saf Siyah-Beyaz)
     qr = qrcode.QRCode(
         version=1, 
         error_correction=qrcode.constants.ERROR_CORRECT_H, 
-        box_size=15, # Çözünürlüğü inanılmaz artırır
-        border=1
+        box_size=20, # Argox'un piksellerine tam oturması için büyütüldü
+        border=2     # Kenar kesilmelerini önlemek için güvenli bölge
     )
     qr.add_data(barkod)
     qr.make(fit=True)
     qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     qr_w, qr_h = qr_img.size
     
-    # 2. Etiket Kanvası (Termal yazıcı oranlarına uygun, yüksek çözünürlüklü dikey)
+    # 2. Etiket Kanvası (Ürün kodu kaldırıldığı için alt kısım daraltıldı)
     etiket_w = qr_w + 120
-    etiket_h = qr_h + 280
+    etiket_h = qr_h + 200 # Gereksiz boşluğu aldık
     etiket_img = Image.new('RGB', (etiket_w, etiket_h), 'white')
     draw = ImageDraw.Draw(etiket_img)
     
-    # 3. Akıllı Font Seçici (Sunucudaki profesyonel fontları arar, bulanıklığı önler)
+    # 3. Termal Uyumlu Kalın Font Seçici
     font_paths = [
         "arialbd.ttf", 
         "arial.ttf", 
@@ -85,42 +85,35 @@ def profesyonel_etiket_olustur(barkod, isim):
         "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"
     ]
     
-    f_mirror = f_isim = f_kod = None
+    f_mirror = f_isim = None
     for p in font_paths:
         try:
-            f_mirror = ImageFont.truetype(p, 65)  # En üstteki MIRROR yazısı kocaman
-            f_isim = ImageFont.truetype(p, 42)    # Model adı
-            f_kod = ImageFont.truetype(p, 32)     # Barkod no
+            f_mirror = ImageFont.truetype(p, 75)  # Çok daha büyük ve kalın MIRROR
+            f_isim = ImageFont.truetype(p, 50)    # Model adı
             break
         except:
             continue
             
     if not f_mirror:
-        # Sunucuda hiçbir font yoksa en temel fonta döner (Bunu önlemek için sunucuya font kuracağız)
-        f_mirror = f_isim = f_kod = ImageFont.load_default()
+        f_mirror = f_isim = ImageFont.load_default()
 
-    # Metni Ortalamak İçin Yardımcı Araç
     def metni_ortala(y_pos, metin, font, fill="black"):
         try:
             w = draw.textlength(metin, font=font)
         except:
-            w = 100 # Eski kütüphaneler için yedek
+            w = 100 
         x_pos = (etiket_w - w) / 2
         draw.text((x_pos, y_pos), metin, fill=fill, font=font)
 
-    # 4. Tasarımı Çizme
-    # Üst Marka
-    metni_ortala(40, "M I R R O R", f_mirror)
+    # 4. Argox Optimizasyonlu Çizim (Gri renk yasak, her şey SAF SİYAH)
+    metni_ortala(30, "M I R R O R", f_mirror, fill="black")
     
-    # Orta QR
     etiket_img.paste(qr_img, ((etiket_w - qr_w) // 2, 130))
     
-    # Alt Ürün Bilgileri (Uzun isimleri keser)
     isim_temiz = isim[:25]
-    metni_ortala(130 + qr_h + 30, isim_temiz, f_isim)
-    metni_ortala(130 + qr_h + 90, f"KOD: {barkod}", f_kod, fill=(50, 50, 50))
+    metni_ortala(130 + qr_h + 20, isim_temiz, f_isim, fill="black")
+    # KOD: {barkod} kısmı tamamen kaldırıldı
     
-    # 5. PNG Olarak Çıktı Alma
     buf = io.BytesIO()
     etiket_img.save(buf, format="PNG")
     return buf.getvalue()
