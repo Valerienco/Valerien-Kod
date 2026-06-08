@@ -9,15 +9,14 @@ import os
 import io
 import urllib.parse
 import json
+import pytesseract
 import qrcode
 import random
 
 st.set_page_config(page_title="MIRROR BRAND B2B", layout="wide", initial_sidebar_state="expanded")
 
-if not os.path.exists("urun_resimleri"):
-    os.makedirs("urun_resimleri")
+if not os.path.exists("urun_resimleri"): os.makedirs("urun_resimleri")
 
-# Ortak Lüks CSS 
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&display=swap');
@@ -83,9 +82,9 @@ def profesyonel_etiket_olustur(barkod, isim):
     
     buf = io.BytesIO()
     etiket_img.save(buf, format="PNG")
-    resim_verisi = buf.getvalue()
+    res_data = buf.getvalue()
     buf.close() 
-    return resim_verisi
+    return res_data
 
 def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items, currency, raw_total, discounted_total):
     img = Image.new('RGB', (850, 1100 + (len(cart_items) * 45)), color=(255, 255, 255))
@@ -230,7 +229,7 @@ def mod_stok_durumu():
                             with st.form(key=f"edit_{row['id']}"):
                                 e_isim = st.text_input("Model Kodu", row['isim'], key=f"isim_{row['id']}")
                                 e_barkod = st.text_input("Barkod (Zorunlu)", row['barkod'], key=f"barkod_{row['id']}")
-                                e_resim = st.file_uploader("📸 Yeni Fotoğraf", type=['png', 'jpg', 'jpeg'], key=f"up_{row['id']}")
+                                e_resim = st.file_uploader("📸 Yeni Fotoğraf", type=['png', 'jpg'], key=f"up_{row['id']}")
                                 
                                 c_1, c_2 = st.columns(2)
                                 e_seri = c_1.selectbox("Seri Adedi", [4,5,6,7,8,10,12], index=[4,5,6,7,8,10,12].index(row['seri_adedi']) if row['seri_adedi'] in [4,5,6,7,8,10,12] else 0)
@@ -258,7 +257,7 @@ def mod_yeni_urun():
     with st.form("urun_ekle"):
         isim = st.text_input("Ürün İsmi")
         barkod = st.text_input("Barkod (Boş bırakırsanız otomatik atanır)")
-        resim = st.file_uploader("📸 Fotoğraf", type=['png', 'jpg', 'jpeg'])
+        resim = st.file_uploader("📸 Fotoğraf", type=['png', 'jpg'])
         
         c1, c2 = st.columns(2)
         seri, stok = c1.selectbox("Seri Adedi", [4,5,6,7,8,10,12]), c1.number_input("Stok", min_value=0)
@@ -278,6 +277,7 @@ def mod_yeni_urun():
                 conn.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod.strip(), isim, yol, seri, stok, fiyat, para))
                 conn.commit(); st.success(f"Eklendi! (Kod: {barkod.strip()})")
 
+# === YENİ NESİL OTOMATİK SEPET (SATIŞ EKRANI) ===
 def mod_satis_ekrani():
     if st.session_state.get('son_satis_fisi'):
         f = st.session_state.son_satis_fisi
@@ -288,10 +288,11 @@ def mod_satis_ekrani():
         if c3.button("🔄 Yeni Satışa Başla", use_container_width=True): st.session_state.son_satis_fisi = None; st.rerun()
         return
 
-    st.header("Satış Ekranı")
-    st.info("💡 Ürün QR'ını kameraya okutun. Okunan ürün anında alt taraftaki satış listesine eklenecektir.")
+    st.header("Hızlı Satış Ekranı")
+    st.info("💡 Ürün QR'ını kameraya okutun. Ürün anında sepete eklenecektir.")
     
-    kamera = st.camera_input("📷 QR / Barkod Okuyucu")
+    # 1. Gereksiz tüm butonlar silindi. Yalnızca kamera!
+    kamera = st.camera_input("📷 QR Okuyucu", key="kamera_input")
     
     if kamera:
         decoded = decode(Image.open(kamera))
@@ -299,6 +300,7 @@ def mod_satis_ekrani():
             barkod = decoded[0].data.decode()
             urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
             if urun:
+                # Sepette bu ürün var mı diye kontrol et
                 var_mi = False
                 for item in st.session_state.sepet:
                     if item['id'] == urun[0]:
@@ -308,35 +310,36 @@ def mod_satis_ekrani():
                         var_mi = True
                         break
                 
+                # Yoksa sepete ANINDA ekle (Butona basmaya gerek kalmadan)
                 if not var_mi:
                     st.session_state.sepet.append({
                         'id': urun[0], 'isim': urun[2], 'resim_url': urun[3], 
                         'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 
                         'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]
                     })
-                st.toast(f"✅ {urun[2]} başarıyla sepete eklendi!")
+                st.success(f"✅ {urun[2]} sepete eklendi! Yeni ürün okutmaya devam edebilirsiniz.")
             else: 
                 st.error("❌ Bu barkoda ait ürün sistemde bulunamadı.")
         else:
-            st.warning("⚠️ Barkod okunamadı, lütfen tekrar çekin.")
+            st.warning("⚠️ Barkod net okunamadı, lütfen tekrar çekin.")
 
     st.divider()
     if not st.session_state.get('sepet'): return st.info("Satış listesi boş. Kameradan ürün okutun.")
 
     st.subheader("🛒 Sepet ve Satış Listesi")
     for i, item in enumerate(st.session_state.sepet):
+        # 2. Ürün fotoğrafı artık sepette KOCAMAN ve HD gözükecek
         c_img, c_isim, c_seri, c_fiyat, c_sil = st.columns([2, 3, 2, 2, 1])
         
-        # HD Büyük Sepet Görseli
         if item.get('resim_url'):
             try: c_img.image(item['resim_url'], use_container_width=True)
             except: c_img.write("Görsel Yok")
             
         c_isim.write(f"**{item['isim']}**")
-        
         y_seri = c_seri.number_input("Seri", min_value=1, value=item['seri_miktar'], key=f"s_{i}")
         y_fiyat = c_fiyat.number_input("Fiyat", min_value=0.0, value=float(item['birim_fiyat']), step=0.5, key=f"f_{i}")
         
+        # 3. Silme butonu sadece altta kaldı
         if c_sil.button("🗑️ Sil", key=f"d_{i}"): 
             st.session_state.sepet.pop(i)
             st.rerun()
@@ -409,7 +412,7 @@ def mod_ayarlar():
 if 'sepet' not in st.session_state: st.session_state.sepet = []
 if 'son_satis_fisi' not in st.session_state: st.session_state.son_satis_fisi = None
 
-menu = { "🏠 Ana Sayfa": mod_anasayfa, "🛒 Satış Ekranı": mod_satis_ekrani, "📦 Stok Durumu": mod_stok_durumu, "➕ Yeni Ürün": mod_yeni_urun, "📂 Siparişler": mod_gecmis, "📇 CRM": mod_crm, "⚙️ Ayarlar": mod_ayarlar }
+menu = { "🏠 Ana Sayfa": mod_anasayfa, "🛒 Hızlı Satış": mod_satis_ekrani, "📦 Stok Durumu": mod_stok_durumu, "➕ Yeni Ürün": mod_yeni_urun, "📂 Siparişler": mod_gecmis, "📇 CRM": mod_crm, "⚙️ Ayarlar": mod_ayarlar }
 
 st.sidebar.title("Yönetim Paneli")
 sec = st.sidebar.selectbox("Gideceğiniz Ekranı Seçin", list(menu.keys()))
