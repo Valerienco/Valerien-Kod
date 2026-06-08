@@ -466,42 +466,38 @@ def mod_satis_ekrani():
 
 def mod_gecmis():
     st.header("📂 Geçmiş Siparişler")
-    with get_db_conn() as conn:
-        df = pd.read_sql_query("SELECT id, siparis_no, tarih, musteri, toplam_adet, toplam_tutar, para_birimi FROM siparis_gecmisi ORDER BY id DESC", conn)
+    df = pd.read_sql_query("SELECT id, siparis_no, tarih, musteri, toplam_adet, toplam_tutar, para_birimi FROM siparis_gecmisi ORDER BY id DESC", conn)
     if df.empty: return st.info("Arşiv boş.")
     st.dataframe(df.drop(columns=["id"]), use_container_width=True)
     
     st.divider()
-    st.subheader("🔍 Geçmiş İrsaliyeleri Yeniden Çıkar veya İptal Et")
-    with get_db_conn() as conn:
-        siparisler = conn.execute("SELECT * FROM siparis_gecmisi ORDER BY id DESC").fetchall()
-    sec_etiket = st.selectbox("İşlem Yapılacak Siparişi Seçin", [f"{s[1]} - {s[3]} ({s[2]})" for s in siparisler])
+    st.subheader("🔍 Hatalı Siparişleri İptal Et (Arşivden Sil)")
+    siparisler = conn.execute("SELECT * FROM siparis_gecmisi ORDER BY id DESC").fetchall()
+    sec_etiket = st.selectbox("İptal Edilecek Siparişi Seçin", [f"{s[1]} - {s[3]} ({s[2]})" for s in siparisler])
     
     if sec_etiket:
         s = next(s for s in siparisler if f"{s[1]} - {s[3]} ({s[2]})" == sec_etiket)
-        
-        c1, c2 = st.columns(2)
-        
-        # --- YENİ TASARIMLA TEKRAR İRSALİYE ÇIKARMA BUTONU ---
-        if c1.button("🔄 İrsaliyeyi Tekrar Çıkar (Yeni Formatla)", use_container_width=True):
-            try:
-                cart_items = json.loads(s[6])
-                raw_tot = sum([i['line_total'] for i in cart_items])
-                
-                # Eski veri, YENİ VE GENİŞLETİLMİŞ motora gönderiliyor
-                jpeg_re = create_invoice_jpeg(s[1], s[2], s[3], s[4], s[5], cart_items, s[9], raw_tot, s[8])
-                
-                st.image(jpeg_re, caption=f"Yeniden Çıkarılan Fiş: {s[1]}", width=450)
-                st.download_button("📥 Yeni Formatlı Fişi İndir", jpeg_re, f"Re_{s[1]}.jpg", "image/jpeg", use_container_width=True)
-            except Exception as e:
-                st.warning("⚠️ Bu sipariş çok eski bir formatta kaydedildiği için detayları okunamıyor.")
+        if st.button("❌ Bu Siparişi Tamamen Sil", use_container_width=True):
+            conn.execute("DELETE FROM siparis_gecmisi WHERE id=?", (s[0],))
+            conn.commit(); st.error("🗑️ Sipariş silindi!"); st.rerun()
 
-        # --- SİPARİŞİ VE FİŞİ TAMAMEN SİLME BUTONU ---
-        if c2.button("❌ Bu Siparişi Tamamen Sil", use_container_width=True):
-            with get_db_conn() as conn:
-                conn.execute("DELETE FROM siparis_gecmisi WHERE id=?", (s[0],))
-                conn.commit()
-            st.error("🗑️ Sipariş arşivden tamamen silindi!"); st.rerun()
+def mod_crm():
+    st.header("📇 Müşteriler (CRM)")
+    with st.form("yeni_m"):
+        isim, tel, adres = st.text_input("Adı*"), st.text_input("Tel"), st.text_area("Adres")
+        if st.form_submit_button("Kaydet") and isim:
+            conn.execute("INSERT INTO musteriler (isim, telefon, adres) VALUES (?,?,?)", (isim, tel, adres))
+            conn.commit(); st.success("Eklendi!"); st.rerun()
+
+def mod_ayarlar():
+    st.header("⚙️ Ayarlar")
+    logo = st.file_uploader("Logo Yükle", type=['png', 'jpg', 'jpeg'])
+    if logo:
+        with open("logo_sistem.png", "wb") as f: f.write(logo.getbuffer())
+        st.success("Logo güncellendi!")
+    if os.path.exists("logo_sistem.png"):
+        st.image("logo_sistem.png", width=200)
+        if st.button("Logoyu Sil"): os.remove("logo_sistem.png"); st.rerun()
 
 # --- MENÜ SİSTEMİ ---
 menu = { "🏠 Ana Sayfa": mod_anasayfa, "🛒 Hızlı Satış": mod_satis_ekrani, "📦 Stok Durumu": mod_stok_durumu, "➕ Yeni Ürün": mod_yeni_urun, "📂 Siparişler": mod_gecmis, "📇 CRM": mod_crm, "⚙️ Ayarlar": mod_ayarlar }
