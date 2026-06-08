@@ -9,11 +9,10 @@ import os
 import io
 import urllib.parse
 import json
-import pytesseract
 import qrcode
 import random
 
-st.set_page_config(page_title="MIRROR BRAND B2B", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Mirrorprive_otomasyon", layout="wide", initial_sidebar_state="expanded")
 
 if not os.path.exists("urun_resimleri"): os.makedirs("urun_resimleri")
 
@@ -27,7 +26,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("MIRROR BRAND B2B Toptan Otomasyon Merkezi")
+st.title("Mirrorprive_otomasyon B2B Yönetim Sistemi")
 
 @st.cache_data(ttl=3600)
 def kurlari_getir():
@@ -167,6 +166,28 @@ def mod_anasayfa():
     m3.metric("🤝 Toplam İşlem", f"{len(df_sip)} Sipariş")
     st.divider()
 
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("📈 Son 10 Siparişin Tutar Dağılımı")
+        son_siparisler = df_sip.tail(10).copy()
+        if not son_siparisler.empty:
+            st.bar_chart(data=son_siparisler, x='siparis_no', y='toplam_tutar', use_container_width=True)
+            
+    with c2:
+        st.subheader("🔥 En Çok Satılan Kalemler")
+        satilan_urunler = []
+        for urunler_json in df_sip['urun_ozeti']:
+            try:
+                items = json.loads(urunler_json)
+                for item in items:
+                    satilan_urunler.append({"Model": item['isim'], "Satılan Seri": item['seri_miktar']})
+            except: pass
+        
+        if satilan_urunler:
+            df_pop = pd.DataFrame(satilan_urunler).groupby('Model').sum().reset_index()
+            df_pop = df_pop.sort_values(by='Satılan Seri', ascending=False).head(5)
+            st.dataframe(df_pop, use_container_width=True, hide_index=True)
+
 def mod_stok_durumu():
     st.header("Mevcut Toptan Stoklar (Grid Vitrin)")
     df = pd.read_sql_query("SELECT * FROM urunler", conn)
@@ -277,7 +298,7 @@ def mod_yeni_urun():
                 conn.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod.strip(), isim, yol, seri, stok, fiyat, para))
                 conn.commit(); st.success(f"Eklendi! (Kod: {barkod.strip()})")
 
-# === YENİ NESİL OTOMATİK SEPET (SATIŞ EKRANI) ===
+# === SEKME YAPISIYLA GÜNCELLENMİŞ YENİ NESİL SATIŞ EKRANI ===
 def mod_satis_ekrani():
     if st.session_state.get('son_satis_fisi'):
         f = st.session_state.son_satis_fisi
@@ -289,107 +310,163 @@ def mod_satis_ekrani():
         return
 
     st.header("Hızlı Satış Ekranı")
-    st.info("💡 Ürün QR'ını kameraya okutun. Ürün anında sepete eklenecektir.")
     
-    # 1. Gereksiz tüm butonlar silindi. Yalnızca kamera!
-    kamera = st.camera_input("📷 QR Okuyucu", key="kamera_input")
+    # İki ayrı kullanım senaryosu için sekmeler oluşturuldu
+    tab1, tab2 = st.tabs(["📷 Kamerayla Okut", "📝 Listeden Seçerek Ekle"])
     
-    if kamera:
-        decoded = decode(Image.open(kamera))
-        if decoded: 
-            barkod = decoded[0].data.decode()
-            urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
-            if urun:
-                # Sepette bu ürün var mı diye kontrol et
-                var_mi = False
-                for item in st.session_state.sepet:
-                    if item['id'] == urun[0]:
-                        item['seri_miktar'] += 1
-                        item['pcs'] = item['seri_miktar'] * item['seri_ici_adet']
-                        item['line_total'] = item['pcs'] * item['birim_fiyat']
-                        var_mi = True
-                        break
+    with tab1:
+        st.info("💡 Ürün QR'ını kameraya okutun. Ürün anında sepete eklenecektir.")
+        kamera = st.camera_input("📷 QR Okuyucu", key="kamera_input")
+        
+        if kamera:
+            decoded = decode(Image.open(kamera))
+            if decoded: 
+                barkod = decoded[0].data.decode()
+                urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
+                if urun:
+                    var_mi = False
+                    for item in st.session_state.sepet:
+                        if item['id'] == urun[0]:
+                            item['seri_miktar'] += 1
+                            item['pcs'] = item['seri_miktar'] * item['seri_ici_adet']
+                            item['line_total'] = item['pcs'] * item['birim_fiyat']
+                            var_mi = True
+                            break
+                    
+                    if not var_mi:
+                        st.session_state.sepet.append({
+                            'id': urun[0], 'isim': urun[2], 'resim_url': urun[3], 
+                            'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 
+                            'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]
+                        })
+                    st.success(f"✅ {urun[2]} sepete eklendi! Yeni ürün okutmaya devam edebilirsiniz.")
+                else: 
+                    st.error("❌ Bu barkoda ait ürün sistemde bulunamadı.")
+            else:
+                st.warning("⚠️ Barkod net okunamadı, lütfen tekrar çekin.")
+
+    with tab2:
+        st.info("💡 Kamerayı kullanamadığınız durumlarda veritabanındaki ürünleri buradan arayıp ekleyebilirsiniz.")
+        # Veritabanındaki tüm ürünleri getir ve listeye dök
+        tum_urunler = conn.execute("SELECT barkod, isim, fiyat, para_birimi FROM urunler ORDER BY isim").fetchall()
+        urun_secenekleri = [f"{u[0]} - {u[1]} ({u[2]} {u[3]})" for u in tum_urunler]
+        
+        secilen_urun_str = st.selectbox("Eklenecek Ürünü Arayın veya Seçin", ["Lütfen Bir Ürün Seçin..."] + urun_secenekleri)
+        
+        if st.button("➕ Seçili Ürünü Sepete Ekle", use_container_width=True):
+            if secilen_urun_str != "Lütfen Bir Ürün Seçin...":
+                # Seçilen formatın başındaki barkod kısmını alıyoruz
+                secilen_barkod = secilen_urun_str.split(" - ")[0]
+                urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (secilen_barkod,)).fetchone()
                 
-                # Yoksa sepete ANINDA ekle (Butona basmaya gerek kalmadan)
-                if not var_mi:
-                    st.session_state.sepet.append({
-                        'id': urun[0], 'isim': urun[2], 'resim_url': urun[3], 
-                        'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 
-                        'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]
-                    })
-                st.success(f"✅ {urun[2]} sepete eklendi! Yeni ürün okutmaya devam edebilirsiniz.")
-            else: 
-                st.error("❌ Bu barkoda ait ürün sistemde bulunamadı.")
-        else:
-            st.warning("⚠️ Barkod net okunamadı, lütfen tekrar çekin.")
+                if urun:
+                    var_mi = False
+                    for item in st.session_state.sepet:
+                        if item['id'] == urun[0]:
+                            item['seri_miktar'] += 1
+                            item['pcs'] = item['seri_miktar'] * item['seri_ici_adet']
+                            item['line_total'] = item['pcs'] * item['birim_fiyat']
+                            var_mi = True
+                            break
+                    
+                    if not var_mi:
+                        st.session_state.sepet.append({
+                            'id': urun[0], 'isim': urun[2], 'resim_url': urun[3], 
+                            'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 
+                            'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]
+                        })
+                    st.success(f"✅ {urun[2]} başarıyla sepete eklendi!")
+                    st.rerun()
 
     st.divider()
-    if not st.session_state.get('sepet'): return st.info("Satış listesi boş. Kameradan ürün okutun.")
-
-    st.subheader("🛒 Sepet ve Satış Listesi")
-    for i, item in enumerate(st.session_state.sepet):
-        # 2. Ürün fotoğrafı artık sepette KOCAMAN ve HD gözükecek
-        c_img, c_isim, c_seri, c_fiyat, c_sil = st.columns([2, 3, 2, 2, 1])
-        
-        if item.get('resim_url'):
-            try: c_img.image(item['resim_url'], use_container_width=True)
-            except: c_img.write("Görsel Yok")
-            
-        c_isim.write(f"**{item['isim']}**")
-        y_seri = c_seri.number_input("Seri", min_value=1, value=item['seri_miktar'], key=f"s_{i}")
-        y_fiyat = c_fiyat.number_input("Fiyat", min_value=0.0, value=float(item['birim_fiyat']), step=0.5, key=f"f_{i}")
-        
-        # 3. Silme butonu sadece altta kaldı
-        if c_sil.button("🗑️ Sil", key=f"d_{i}"): 
-            st.session_state.sepet.pop(i)
+    
+    # HATA ÇÖZÜMÜ: Yanlış denemeleri tek tuşla tamamen temizleme butonu
+    if st.session_state.get('sepet'):
+        ac1, ac2 = st.columns([4, 1])
+        ac1.subheader("🛒 Sepet ve Satış Listesi")
+        if ac2.button("🚨 Sepeti Tamamen Boşalt", use_container_width=True):
+            st.session_state.sepet = []
             st.rerun()
             
-        item['seri_miktar'], item['birim_fiyat'] = y_seri, y_fiyat
-        item['pcs'], item['line_total'] = y_seri * item['seri_ici_adet'], y_seri * item['seri_ici_adet'] * y_fiyat
-
-    st.divider()
-    musteriler = conn.execute("SELECT isim, telefon, adres FROM musteriler").fetchall()
-    secilen = st.selectbox("Müşteri Seçin", ["+ Yeni Müşteri Kaydet"] + [m[0] for m in musteriler])
-    
-    with st.form("checkout"):
-        if secilen == "+ Yeni Müşteri Kaydet":
-            c_m1, c_m2 = st.columns(2)
-            m_isim, m_tel = c_m1.text_input("Adı*"), c_m1.text_input("Tel")
-            m_adres = c_m2.text_area("Adres")
-        else:
-            m_isim, m_tel, m_adres = next(m for m in musteriler if m[0] == secilen)
-            st.info(f"**Müşteri:** {m_isim}")
-
-        indirim = st.number_input("İndirim (%)", 0, 100, 0)
-        if st.form_submit_button("Satışı Onayla") and m_isim:
-            if secilen == "+ Yeni Müşteri Kaydet": conn.execute("INSERT INTO musteriler (isim, telefon, adres) VALUES (?,?,?)", (m_isim, m_tel, m_adres))
+        for i, item in enumerate(st.session_state.sepet):
+            c_img, c_isim, c_seri, c_fiyat, c_sil = st.columns([2, 3, 2, 2, 1])
             
-            raw_total = sum([i['line_total'] for i in st.session_state.sepet])
-            disc_total = raw_total * ((100 - indirim) / 100)
-            t_adet = sum([i['pcs'] for i in st.session_state.sepet])
-            p_birim = st.session_state.sepet[0]['para_birimi']
-            sip_no, tarih = f"ORD-{datetime.now().strftime('%Y%m%d%H%M')}", datetime.now().strftime('%d/%m/%Y %H:%M')
+            if item.get('resim_url'):
+                try: c_img.image(item['resim_url'], use_container_width=True)
+                except: c_img.write("Görsel Yok")
+                
+            c_isim.write(f"**{item['isim']}**")
+            y_seri = c_seri.number_input("Seri", min_value=1, value=item['seri_miktar'], key=f"s_{i}")
+            y_fiyat = c_fiyat.number_input("Fiyat", min_value=0.0, value=float(item['birim_fiyat']), step=0.5, key=f"f_{i}")
             
-            for i in st.session_state.sepet: conn.execute("UPDATE urunler SET stok_seri=stok_seri-? WHERE id=?", (i['seri_miktar'], i['id']))
-            sepet_json = json.dumps(st.session_state.sepet)
-            
-            conn.execute("INSERT INTO siparis_gecmisi (siparis_no, tarih, musteri, telefon, adres, urun_ozeti, toplam_adet, toplam_tutar, para_birimi) VALUES (?,?,?,?,?,?,?,?,?)",
-                      (sip_no, tarih, m_isim, m_tel, m_adres, sepet_json, t_adet, disc_total, p_birim))
-            conn.commit()
+            if c_sil.button("🗑️ Sil", key=f"d_{i}"): 
+                st.session_state.sepet.pop(i)
+                st.rerun()
+                
+            item['seri_miktar'], item['birim_fiyat'] = y_seri, y_fiyat
+            item['pcs'], item['line_total'] = y_seri * item['seri_ici_adet'], y_seri * item['seri_ici_adet'] * y_fiyat
 
-            wa_msg = urllib.parse.quote(f"Hello {m_isim},\nYour order {sip_no} is confirmed! ✔️\nTotal: {disc_total:.2f} {p_birim}")
-            st.session_state.son_satis_fisi = {
-                "jpeg_data": create_invoice_jpeg(sip_no, tarih, m_isim, m_tel, m_adres, st.session_state.sepet, p_birim, raw_total, disc_total),
-                "file_name": f"{sip_no}.jpg", "siparis_no": sip_no, "telefon": m_tel,
-                "wa_url": f"https://wa.me/{"".join(filter(str.isdigit, m_tel))}?text={wa_msg}" if m_tel else ""
-            }
-            st.session_state.sepet = []; st.rerun()
+        st.divider()
+        musteriler = conn.execute("SELECT isim, telefon, adres FROM musteriler").fetchall()
+        secilen = st.selectbox("Müşteri Seçin", ["+ Yeni Müşteri Kaydet"] + [m[0] for m in musteriler])
+        
+        with st.form("checkout"):
+            if secilen == "+ Yeni Müşteri Kaydet":
+                c_m1, c_m2 = st.columns(2)
+                m_isim, m_tel = c_m1.text_input("Adı*"), c_m1.text_input("Tel")
+                m_adres = c_m2.text_area("Adres")
+            else:
+                m_isim, m_tel, m_adres = next(m for m in musteriler if m[0] == secilen)
+                st.info(f"**Müşteri:** {m_isim}")
+
+            indirim = st.number_input("İndirim (%)", 0, 100, 0)
+            if st.form_submit_button("Satışı Onayla") and m_isim:
+                if secilen == "+ Yeni Müşteri Kaydet": conn.execute("INSERT INTO musteriler (isim, telefon, adres) VALUES (?,?,?)", (m_isim, m_tel, m_adres))
+                
+                raw_total = sum([i['line_total'] for i in st.session_state.sepet])
+                disc_total = raw_total * ((100 - indirim) / 100)
+                t_adet = sum([i['pcs'] for i in st.session_state.sepet])
+                p_birim = st.session_state.sepet[0]['para_birimi']
+                sip_no, tarih = f"ORD-{datetime.now().strftime('%Y%m%d%H%M')}", datetime.now().strftime('%d/%m/%Y %H:%M')
+                
+                for i in st.session_state.sepet: conn.execute("UPDATE urunler SET stok_seri=stok_seri-? WHERE id=?", (i['seri_miktar'], i['id']))
+                sepet_json = json.dumps(st.session_state.sepet)
+                
+                conn.execute("INSERT INTO siparis_gecmisi (siparis_no, tarih, musteri, telefon, adres, urun_ozeti, toplam_adet, toplam_tutar, para_birimi) VALUES (?,?,?,?,?,?,?,?,?)",
+                          (sip_no, tarih, m_isim, m_tel, m_adres, sepet_json, t_adet, disc_total, p_birim))
+                conn.commit()
+
+                wa_msg = urllib.parse.quote(f"Hello {m_isim},\nYour order {sip_no} is confirmed! ✔️\nTotal: {disc_total:.2f} {p_birim}")
+                st.session_state.son_satis_fisi = {
+                    "jpeg_data": create_invoice_jpeg(sip_no, tarih, m_isim, m_tel, m_adres, st.session_state.sepet, p_birim, raw_total, disc_total),
+                    "file_name": f"{sip_no}.jpg", "siparis_no": sip_no, "telefon": m_tel,
+                    "wa_url": f"https://wa.me/{"".join(filter(str.isdigit, m_tel))}?text={wa_msg}" if m_tel else ""
+                }
+                st.session_state.sepet = []; st.rerun()
+    else:
+        st.info("Satış listesi boş. Kameradan ürün okutun veya listeden ürün seçin.")
 
 def mod_gecmis():
     st.header("📂 Geçmiş Siparişler")
     df = pd.read_sql_query("SELECT id, siparis_no, tarih, musteri, toplam_adet, toplam_tutar, para_birimi FROM siparis_gecmisi ORDER BY id DESC", conn)
     if df.empty: return st.info("Arşiv boş.")
     st.dataframe(df.drop(columns=["id"]), use_container_width=True)
+    
+    st.divider()
+    st.subheader("🔍 Hatalı/Deneme Siparişlerini İptal Et (Arşivden Sil)")
+    siparisler = conn.execute("SELECT * FROM siparis_gecmisi ORDER BY id DESC").fetchall()
+    sec_etiket = st.selectbox("İşlem Yapmak İstediğiniz Siparişi Seçin", [f"{s[1]} - {s[3]} ({s[2]})" for s in siparisler])
+    
+    if sec_etiket:
+        s = next(s for s in siparisler if f"{s[1]} - {s[3]} ({s[2]})" == sec_etiket)
+        siparis_id = s[0]
+        
+        # Test amaçlı oluşturulan fişleri kolayca silme özelliği
+        if st.button("❌ Bu Siparişi Arşivden Tamamen Sil (Stoklar Geri Yüklenmez)", use_container_width=True):
+            conn.execute("DELETE FROM siparis_gecmisi WHERE id=?", (siparis_id,))
+            conn.commit()
+            st.error("🗑️ Sipariş arşivden başarıyla silindi!")
+            st.rerun()
 
 def mod_crm():
     st.header("📇 Müşteriler (CRM)")
