@@ -37,6 +37,8 @@ def kurlari_getir():
 
 usd_kur, eur_kur, _ = kurlari_getir()
 
+# --- HATA ÇÖZÜMÜ: Kalıcı Bağlantı Havuzu (Anti-Crash) ---
+@st.cache_resource
 def get_db_conn():
     conn = sqlite3.connect('mirrorbrand_stok.db', check_same_thread=False, timeout=30.0)
     conn.execute('''CREATE TABLE IF NOT EXISTS urunler (id INTEGER PRIMARY KEY, barkod TEXT, isim TEXT, resim_url TEXT, seri_adedi INTEGER, stok_seri INTEGER, fiyat REAL, para_birimi TEXT)''')
@@ -298,7 +300,6 @@ def mod_yeni_urun():
                 conn.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod.strip(), isim, yol, seri, stok, fiyat, para))
                 conn.commit(); st.success(f"Eklendi! (Kod: {barkod.strip()})")
 
-# === SEKME YAPISIYLA GÜNCELLENMİŞ YENİ NESİL SATIŞ EKRANI ===
 def mod_satis_ekrani():
     if st.session_state.get('son_satis_fisi'):
         f = st.session_state.son_satis_fisi
@@ -311,7 +312,6 @@ def mod_satis_ekrani():
 
     st.header("Hızlı Satış Ekranı")
     
-    # İki ayrı kullanım senaryosu için sekmeler oluşturuldu
     tab1, tab2 = st.tabs(["📷 Kamerayla Okut", "📝 Listeden Seçerek Ekle"])
     
     with tab1:
@@ -347,7 +347,6 @@ def mod_satis_ekrani():
 
     with tab2:
         st.info("💡 Kamerayı kullanamadığınız durumlarda veritabanındaki ürünleri buradan arayıp ekleyebilirsiniz.")
-        # Veritabanındaki tüm ürünleri getir ve listeye dök
         tum_urunler = conn.execute("SELECT barkod, isim, fiyat, para_birimi FROM urunler ORDER BY isim").fetchall()
         urun_secenekleri = [f"{u[0]} - {u[1]} ({u[2]} {u[3]})" for u in tum_urunler]
         
@@ -355,7 +354,6 @@ def mod_satis_ekrani():
         
         if st.button("➕ Seçili Ürünü Sepete Ekle", use_container_width=True):
             if secilen_urun_str != "Lütfen Bir Ürün Seçin...":
-                # Seçilen formatın başındaki barkod kısmını alıyoruz
                 secilen_barkod = secilen_urun_str.split(" - ")[0]
                 urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (secilen_barkod,)).fetchone()
                 
@@ -380,7 +378,6 @@ def mod_satis_ekrani():
 
     st.divider()
     
-    # HATA ÇÖZÜMÜ: Yanlış denemeleri tek tuşla tamamen temizleme butonu
     if st.session_state.get('sepet'):
         ac1, ac2 = st.columns([4, 1])
         ac1.subheader("🛒 Sepet ve Satış Listesi")
@@ -461,8 +458,7 @@ def mod_gecmis():
         s = next(s for s in siparisler if f"{s[1]} - {s[3]} ({s[2]})" == sec_etiket)
         siparis_id = s[0]
         
-        # Test amaçlı oluşturulan fişleri kolayca silme özelliği
-        if st.button("❌ Bu Siparişi Arşivden Tamamen Sil (Stoklar Geri Yüklenmez)", use_container_width=True):
+        if st.button("❌ Bu Siparişi Arşivden Tamamen Sil", use_container_width=True):
             conn.execute("DELETE FROM siparis_gecmisi WHERE id=?", (siparis_id,))
             conn.commit()
             st.error("🗑️ Sipariş arşivden başarıyla silindi!")
