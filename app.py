@@ -12,34 +12,25 @@ import json
 import qrcode
 import random
 
-st.set_page_config(page_title="Mirrorprive_otomasyon", layout="wide", initial_sidebar_state="expanded")
+# Sayfa Yapılandırması
+st.set_page_config(page_title="Mirrorprive_otomasyon", layout="wide")
 
 if not os.path.exists("urun_resimleri"): os.makedirs("urun_resimleri")
 
+# CSS: Hızlı ve hafif arayüz
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&display=swap');
-    html, body, [class*="css"], .stApp, p, h1, h2, h3, h4, h5, h6 { font-family: 'Montserrat', sans-serif !important; }
-    .block-container { padding-top: 2rem !important; }
-    div[data-testid="stAlert"] { border-radius: 0px !important; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-    div.stButton > button:first-child { border-radius: 0px !important; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; transition: all 0.3s; }
+    html, body, .stApp { font-family: 'Montserrat', sans-serif !important; }
+    .stButton > button { border-radius: 0px !important; width: 100%; }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("Mirrorprive_otomasyon B2B Yönetim Sistemi")
 
-@st.cache_data(ttl=3600)
-def kurlari_getir():
-    try:
-        r = requests.get("https://api.exchangerate-api.com/v4/latest/USD").json()
-        return r["rates"]["TRY"], (r["rates"]["TRY"] / r["rates"]["EUR"]), r["rates"]["USD"]
-    except: return 0, 0, 0
-
-usd_kur, eur_kur, _ = kurlari_getir()
-
+# --- VERİTABANI BAĞLANTISI (TEK KANAL - ANTI CRASH) ---
 @st.cache_resource
 def get_db_conn():
-    conn = sqlite3.connect('mirrorbrand_stok.db', check_same_thread=False, timeout=15.0)
+    conn = sqlite3.connect('mirrorbrand_stok.db', check_same_thread=False, timeout=30.0)
     conn.execute('''CREATE TABLE IF NOT EXISTS urunler (id INTEGER PRIMARY KEY, barkod TEXT, isim TEXT, resim_url TEXT, seri_adedi INTEGER, stok_seri INTEGER, fiyat REAL, para_birimi TEXT)''')
     conn.execute('''CREATE TABLE IF NOT EXISTS musteriler (id INTEGER PRIMARY KEY, isim TEXT, telefon TEXT, adres TEXT)''')
     conn.execute('''CREATE TABLE IF NOT EXISTS siparis_gecmisi (id INTEGER PRIMARY KEY, siparis_no TEXT, tarih TEXT, musteri TEXT, telefon TEXT, adres TEXT, urun_ozeti TEXT, toplam_adet INTEGER, toplam_tutar REAL, para_birimi TEXT)''')
@@ -48,8 +39,7 @@ def get_db_conn():
 
 conn = get_db_conn()
 
-if 'sepet' not in st.session_state: st.session_state.sepet = []
-if 'son_satis_fisi' not in st.session_state: st.session_state.son_satis_fisi = None
+# --- YARDIMCI MOTORLAR ---
 
 def profesyonel_etiket_olustur(barkod, isim):
     kesin_barkod = str(barkod).strip()
@@ -59,7 +49,9 @@ def profesyonel_etiket_olustur(barkod, isim):
     qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
     qr_w, qr_h = qr_img.size
-    etiket_w, etiket_h = qr_w + 120, qr_h + 200 
+    
+    # ETİKET KESİLME SORUNU ÇÖZÜMÜ: Kanvas yüksekliği 200'den 260'a çıkarıldı.
+    etiket_w, etiket_h = qr_w + 120, qr_h + 260 
     etiket_img = Image.new('RGB', (etiket_w, etiket_h), 'white')
     draw = ImageDraw.Draw(etiket_img)
     
@@ -68,7 +60,8 @@ def profesyonel_etiket_olustur(barkod, isim):
     for p in font_paths:
         try:
             f_mirror = ImageFont.truetype(p, 75)
-            f_isim = ImageFont.truetype(p, 50)
+            # İsim fontu 50'den 45'e çekildi ki uzun isimler yatayda rahat sığsın
+            f_isim = ImageFont.truetype(p, 45)
             break
         except: continue
             
@@ -79,18 +72,18 @@ def profesyonel_etiket_olustur(barkod, isim):
         except: w = 100 
         draw.text(((etiket_w - w) / 2, y_pos), metin, fill=fill, font=font)
 
-    metni_ortala(30, "M I R R O R", f_mirror, fill="black")
-    etiket_img.paste(qr_img, ((etiket_w - qr_w) // 2, 130))
-    metni_ortala(130 + qr_h + 20, str(isim)[:25], f_isim, fill="black")
+    # Y koordinatları rahatlatıldı
+    metni_ortala(40, "M I R R O R", f_mirror, fill="black")
+    etiket_img.paste(qr_img, ((etiket_w - qr_w) // 2, 140))
+    # Alt metin QR'dan tam 30 piksel aşağıya, güvenli bölgeye yerleştirildi
+    metni_ortala(140 + qr_h + 30, str(isim)[:30], f_isim, fill="black")
     
     with io.BytesIO() as buf:
         etiket_img.save(buf, format="PNG")
         res_data = buf.getvalue()
     return res_data
 
-# --- HATA ÇÖZÜMÜ: Genişletilmiş ve CPU Dostu İrsaliye Motoru ---
 def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items, currency, raw_total, discounted_total):
-    # Kanvas genişliği 850'den 950'ye çıkarıldı
     img = Image.new('RGB', (950, 1100 + (len(cart_items) * 45)), color=(255, 255, 255))
     draw = ImageDraw.Draw(img)
     
@@ -123,7 +116,6 @@ def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items
 
     sym = "$" if "USD" in currency else ("€" if "EUR" in currency else ("₺" if "TRY" in currency else currency))
     
-    # Sütun aralıkları genişletildi, iç içe girme sorunu çözüldü
     draw.text((50, y), "Series", font=f_bold)
     draw.text((150, y), "Model", font=f_bold)
     draw.text((550, y), "Pcs", font=f_bold)
@@ -148,9 +140,15 @@ def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items
     draw.text((450, y), f"NET TOTAL: {discounted_total:.2f} {sym}", fill=(34,139,34), font=f_net); y += 65
     
     eq_try, eq_usd, eq_eur = 0, 0, 0
-    if "USD" in currency: eq_try = discounted_total * usd_kur; eq_eur = eq_try / eur_kur if eur_kur > 0 else 0
-    elif "EUR" in currency: eq_try = discounted_total * eur_kur; eq_usd = eq_try / usd_kur if usd_kur > 0 else 0
-    else: eq_usd = discounted_total / usd_kur if usd_kur > 0 else 0; eq_eur = discounted_total / eur_kur if eur_kur > 0 else 0
+    # Kurları anlık olarak en üstteki fonksiyondan alıyoruz
+    try:
+        usd_rate, eur_rate, _ = kurlari_getir()
+    except:
+        usd_rate, eur_rate = 0, 0
+
+    if "USD" in currency: eq_try = discounted_total * usd_rate; eq_eur = eq_try / eur_rate if eur_rate > 0 else 0
+    elif "EUR" in currency: eq_try = discounted_total * eur_rate; eq_usd = eq_try / usd_rate if usd_rate > 0 else 0
+    else: eq_usd = discounted_total / usd_rate if usd_rate > 0 else 0; eq_eur = discounted_total / eur_rate if eur_rate > 0 else 0
 
     if eq_usd: draw.text((450, y), f"Eq USD: {eq_usd:.2f} $", fill=(120,120,120), font=f_norm); y += 35
     if eq_eur: draw.text((450, y), f"Eq EUR: {eq_eur:.2f} €", fill=(120,120,120), font=f_norm); y += 35
@@ -158,25 +156,32 @@ def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items
     
     draw.text((50, y), "Information Receipt. Not a Financial Document.", fill=(160,160,160), font=f_norm)
     
-    # RAM Patlamasını önleyen Memory-Safe kapatma metodu
     with io.BytesIO() as buf:
         img.save(buf, format='JPEG', quality=85, optimize=True)
         res_data = buf.getvalue()
     return res_data
 
 
+# --- MODÜLLER ---
+
 def mod_anasayfa():
     st.header("📊 Yönetim Paneli (Kokpit)")
-    df_sip = pd.read_sql_query("SELECT * FROM siparis_gecmisi", conn)
+    with get_db_conn() as conn:
+        df_sip = pd.read_sql_query("SELECT * FROM siparis_gecmisi", conn)
     
     if df_sip.empty: return st.info("Henüz satış verisi bulunmuyor.")
+
+    try:
+        usd_rate, eur_rate, _ = kurlari_getir()
+    except:
+        usd_rate, eur_rate = 1, 1
 
     toplam_ciro_usd, toplam_satilan_adet = 0, df_sip['toplam_adet'].sum()
     for _, r in df_sip.iterrows():
         t = r['toplam_tutar']
         if "USD" in r['para_birimi']: toplam_ciro_usd += t
-        elif "EUR" in r['para_birimi'] and eur_kur > 0: toplam_ciro_usd += (t * eur_kur) / usd_kur
-        elif "TRY" in r['para_birimi'] and usd_kur > 0: toplam_ciro_usd += t / usd_kur
+        elif "EUR" in r['para_birimi'] and eur_rate > 0: toplam_ciro_usd += (t * eur_rate) / usd_rate
+        elif "TRY" in r['para_birimi'] and usd_rate > 0: toplam_ciro_usd += t / usd_rate
 
     m1, m2, m3 = st.columns(3)
     m1.metric("💰 Toplam Satış Hacmi", f"{toplam_ciro_usd:,.2f} $")
@@ -207,7 +212,8 @@ def mod_anasayfa():
 
 def mod_stok_durumu():
     st.header("Mevcut Toptan Stoklar (Grid Vitrin)")
-    df = pd.read_sql_query("SELECT * FROM urunler", conn)
+    with get_db_conn() as conn:
+        df = pd.read_sql_query("SELECT * FROM urunler", conn)
     if df.empty: return st.info("Sistemde henüz ürün yok.")
         
     f1, f2, f3 = st.columns([2, 1, 1])
@@ -254,8 +260,10 @@ def mod_stok_durumu():
                         bc1, bc2 = st.columns(2)
                         with bc1:
                             if st.button("🗑️ Sil", key=f"del_{row['id']}", use_container_width=True):
-                                conn.execute("DELETE FROM urunler WHERE id=?", (int(row['id']),))
-                                conn.commit(); st.rerun()
+                                with get_db_conn() as conn:
+                                    conn.execute("DELETE FROM urunler WHERE id=?", (int(row['id']),))
+                                    conn.commit()
+                                st.rerun()
                         with bc2:
                             etiket_verisi = profesyonel_etiket_olustur(row['barkod'], row['isim'])
                             st.download_button("🖨️ Etiket", data=etiket_verisi, file_name=f"MIRROR_{row['barkod']}.png", mime="image/png", key=f"qrdl_{row['id']}", use_container_width=True)
@@ -275,17 +283,19 @@ def mod_stok_durumu():
                                 if st.form_submit_button("Kaydet"):
                                     if not e_barkod.strip(): st.error("Barkod boş olamaz!")
                                     else:
-                                        mevcut = conn.execute("SELECT id FROM urunler WHERE barkod=? AND id!=?", (e_barkod.strip(), int(row['id']))).fetchone()
-                                        if mevcut: st.error("Barkod kullanımda!")
-                                        else:
-                                            yeni_yol = row['resim_url'] 
-                                            if e_resim:
-                                                yeni_yol = f"urun_resimleri/{e_barkod.strip()}.jpg"
-                                                img_up = Image.open(e_resim).convert("RGB")
-                                                img_up.thumbnail((800, 800))
-                                                img_up.save(yeni_yol, "JPEG", optimize=True, quality=85)
-                                            conn.execute("UPDATE urunler SET barkod=?, isim=?, resim_url=?, seri_adedi=?, stok_seri=?, fiyat=?, para_birimi=? WHERE id=?", (e_barkod.strip(), e_isim, yeni_yol, e_seri, e_stok, e_fiyat, e_para, int(row['id'])))
-                                            conn.commit(); st.success("Kaydedildi!"); st.rerun()
+                                        with get_db_conn() as conn:
+                                            mevcut = conn.execute("SELECT id FROM urunler WHERE barkod=? AND id!=?", (e_barkod.strip(), int(row['id']))).fetchone()
+                                            if mevcut: st.error("Barkod kullanımda!")
+                                            else:
+                                                yeni_yol = row['resim_url'] 
+                                                if e_resim:
+                                                    yeni_yol = f"urun_resimleri/{e_barkod.strip()}.jpg"
+                                                    img_up = Image.open(e_resim).convert("RGB")
+                                                    img_up.thumbnail((800, 800))
+                                                    img_up.save(yeni_yol, "JPEG", optimize=True, quality=85)
+                                                conn.execute("UPDATE urunler SET barkod=?, isim=?, resim_url=?, seri_adedi=?, stok_seri=?, fiyat=?, para_birimi=? WHERE id=?", (e_barkod.strip(), e_isim, yeni_yol, e_seri, e_stok, e_fiyat, e_para, int(row['id'])))
+                                                conn.commit()
+                                        st.success("Kaydedildi!"); st.rerun()
 
 def mod_yeni_urun():
     st.header("Yeni Ürün Tanımla")
@@ -299,23 +309,30 @@ def mod_yeni_urun():
         para, fiyat = c2.selectbox("Birim", ["USD ($)", "EUR (€)", "TRY (₺)"]), c2.number_input("Fiyat", min_value=0.0)
         
         if st.form_submit_button("Kaydet") and isim:
-            if not barkod.strip(): barkod = f"MB-{random.randint(100000, 999999)}"
-            mevcut = conn.execute("SELECT id FROM urunler WHERE barkod=?", (barkod.strip(),)).fetchone()
-            if mevcut: st.error("Barkod kayıtlı!")
-            else:
-                yol = ""
-                if resim:
-                    yol = f"urun_resimleri/{barkod.strip()}.jpg"
-                    img_up = Image.open(resim).convert("RGB")
-                    img_up.thumbnail((800, 800))
-                    img_up.save(yol, "JPEG", optimize=True, quality=85)
-                conn.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod.strip(), isim, yol, seri, stok, fiyat, para))
-                conn.commit(); st.success(f"Eklendi! (Kod: {barkod.strip()})")
+            with get_db_conn() as conn:
+                if not barkod.strip(): barkod = f"MB-{random.randint(100000, 999999)}"
+                mevcut = conn.execute("SELECT id FROM urunler WHERE barkod=?", (barkod.strip(),)).fetchone()
+                if mevcut: st.error("Barkod kayıtlı!")
+                else:
+                    yol = ""
+                    if resim:
+                        yol = f"urun_resimleri/{barkod.strip()}.jpg"
+                        img_up = Image.open(resim).convert("RGB")
+                        img_up.thumbnail((800, 800))
+                        img_up.save(yol, "JPEG", optimize=True, quality=85)
+                    conn.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod.strip(), isim, yol, seri, stok, fiyat, para))
+                    conn.commit()
+            st.success(f"Eklendi! (Kod: {barkod.strip()})")
 
 @st.cache_data(ttl=60)
 def dropdown_icin_urunleri_getir():
-    tum_urunler = conn.execute("SELECT barkod, isim, fiyat, para_birimi FROM urunler ORDER BY isim").fetchall()
+    with get_db_conn() as conn:
+        tum_urunler = conn.execute("SELECT barkod, isim, fiyat, para_birimi FROM urunler ORDER BY isim").fetchall()
     return [f"{u[0]} - {u[1]} ({u[2]} {u[3]})" for u in tum_urunler]
+
+# --- SATIŞ EKRANI (HAFİF, HIZLI, CRASH-FREE) ---
+if 'sepet' not in st.session_state: st.session_state.sepet = []
+if 'son_satis_fisi' not in st.session_state: st.session_state.son_satis_fisi = None
 
 def mod_satis_ekrani():
     if st.session_state.get('son_satis_fisi'):
@@ -338,7 +355,8 @@ def mod_satis_ekrani():
             decoded = decode(Image.open(kamera))
             if decoded: 
                 barkod = decoded[0].data.decode()
-                urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
+                with get_db_conn() as conn:
+                    urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
                 if urun:
                     var_mi = False
                     for item in st.session_state.sepet:
@@ -366,7 +384,8 @@ def mod_satis_ekrani():
         if st.button("➕ Seçili Ürünü Sepete Ekle", use_container_width=True):
             if secilen_urun_str != "Lütfen Bir Ürün Seçin...":
                 secilen_barkod = secilen_urun_str.split(" - ")[0]
-                urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (secilen_barkod,)).fetchone()
+                with get_db_conn() as conn:
+                    urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (secilen_barkod,)).fetchone()
                 
                 if urun:
                     var_mi = False
@@ -415,7 +434,8 @@ def mod_satis_ekrani():
             item['pcs'], item['line_total'] = y_seri * item['seri_ici_adet'], y_seri * item['seri_ici_adet'] * y_fiyat
 
         st.divider()
-        musteriler = conn.execute("SELECT isim, telefon, adres FROM musteriler").fetchall()
+        with get_db_conn() as conn:
+            musteriler = conn.execute("SELECT isim, telefon, adres FROM musteriler").fetchall()
         secilen = st.selectbox("Müşteri Seçin", ["+ Yeni Müşteri Kaydet"] + [m[0] for m in musteriler])
         
         with st.form("checkout"):
@@ -429,27 +449,26 @@ def mod_satis_ekrani():
 
             indirim = st.number_input("İndirim (%)", 0, 100, 0)
             
-            # --- HATA ÇÖZÜMÜ: Stok düşme işlemi paketlendi (Transaction Block) ---
             if st.form_submit_button("Satışı Onayla") and m_isim:
                 try:
-                    if secilen == "+ Yeni Müşteri Kaydet": 
-                        conn.execute("INSERT INTO musteriler (isim, telefon, adres) VALUES (?,?,?)", (m_isim, m_tel, m_adres))
-                    
-                    raw_total = sum([i['line_total'] for i in st.session_state.sepet])
-                    disc_total = raw_total * ((100 - indirim) / 100)
-                    t_adet = sum([i['pcs'] for i in st.session_state.sepet])
-                    p_birim = st.session_state.sepet[0]['para_birimi']
-                    sip_no, tarih = f"ORD-{datetime.now().strftime('%Y%m%d%H%M')}", datetime.now().strftime('%d/%m/%Y %H:%M')
-                    
-                    # 16+ Ürünü tek seferde, kilitlenmeden stoktan düşme garantisi
-                    for i in st.session_state.sepet: 
-                        conn.execute("UPDATE urunler SET stok_seri=stok_seri-? WHERE id=?", (i['seri_miktar'], i['id']))
-                    
-                    sepet_json = json.dumps(st.session_state.sepet)
-                    conn.execute("INSERT INTO siparis_gecmisi (siparis_no, tarih, musteri, telefon, adres, urun_ozeti, toplam_adet, toplam_tutar, para_birimi) VALUES (?,?,?,?,?,?,?,?,?)",
-                              (sip_no, tarih, m_isim, m_tel, m_adres, sepet_json, t_adet, disc_total, p_birim))
-                    conn.commit()
-                    
+                    with get_db_conn() as conn:
+                        if secilen == "+ Yeni Müşteri Kaydet": 
+                            conn.execute("INSERT INTO musteriler (isim, telefon, adres) VALUES (?,?,?)", (m_isim, m_tel, m_adres))
+                        
+                        raw_total = sum([i['line_total'] for i in st.session_state.sepet])
+                        disc_total = raw_total * ((100 - indirim) / 100)
+                        t_adet = sum([i['pcs'] for i in st.session_state.sepet])
+                        p_birim = st.session_state.sepet[0]['para_birimi']
+                        sip_no, tarih = f"ORD-{datetime.now().strftime('%Y%m%d%H%M')}", datetime.now().strftime('%d/%m/%Y %H:%M')
+                        
+                        for i in st.session_state.sepet: 
+                            conn.execute("UPDATE urunler SET stok_seri=stok_seri-? WHERE id=?", (i['seri_miktar'], i['id']))
+                        
+                        sepet_json = json.dumps(st.session_state.sepet)
+                        conn.execute("INSERT INTO siparis_gecmisi (siparis_no, tarih, musteri, telefon, adres, urun_ozeti, toplam_adet, toplam_tutar, para_birimi) VALUES (?,?,?,?,?,?,?,?,?)",
+                                  (sip_no, tarih, m_isim, m_tel, m_adres, sepet_json, t_adet, disc_total, p_birim))
+                        conn.commit()
+                        
                     wa_msg = urllib.parse.quote(f"Hello {m_isim},\nYour order {sip_no} is confirmed! ✔️\nTotal: {disc_total:.2f} {p_birim}")
                     st.session_state.son_satis_fisi = {
                         "jpeg_data": create_invoice_jpeg(sip_no, tarih, m_isim, m_tel, m_adres, st.session_state.sepet, p_birim, raw_total, disc_total),
@@ -458,36 +477,54 @@ def mod_satis_ekrani():
                     }
                     st.session_state.sepet = []; st.rerun()
                 except Exception as e:
-                    conn.rollback() # İşlem patlarsa sistemi geri al, çökmesine izin verme!
-                    st.error("Veritabanı yoğunluğu yaşandı. Lütfen Satışı Onayla butonuna tekrar basın.")
+                    st.error("Sistem yoğunluğu yaşandı, lütfen tekrar deneyin.")
 
     else:
         st.info("Satış listesi boş. Kameradan ürün okutun veya listeden ürün seçin.")
 
 def mod_gecmis():
     st.header("📂 Geçmiş Siparişler")
-    df = pd.read_sql_query("SELECT id, siparis_no, tarih, musteri, toplam_adet, toplam_tutar, para_birimi FROM siparis_gecmisi ORDER BY id DESC", conn)
+    with get_db_conn() as conn:
+        df = pd.read_sql_query("SELECT id, siparis_no, tarih, musteri, toplam_adet, toplam_tutar, para_birimi FROM siparis_gecmisi ORDER BY id DESC", conn)
     if df.empty: return st.info("Arşiv boş.")
     st.dataframe(df.drop(columns=["id"]), use_container_width=True)
     
     st.divider()
-    st.subheader("🔍 Hatalı Siparişleri İptal Et (Arşivden Sil)")
-    siparisler = conn.execute("SELECT * FROM siparis_gecmisi ORDER BY id DESC").fetchall()
-    sec_etiket = st.selectbox("İptal Edilecek Siparişi Seçin", [f"{s[1]} - {s[3]} ({s[2]})" for s in siparisler])
+    st.subheader("🔍 Geçmiş İrsaliyeleri Yeniden Çıkar veya İptal Et")
+    with get_db_conn() as conn:
+        siparisler = conn.execute("SELECT * FROM siparis_gecmisi ORDER BY id DESC").fetchall()
+    sec_etiket = st.selectbox("İşlem Yapılacak Siparişi Seçin", [f"{s[1]} - {s[3]} ({s[2]})" for s in siparisler])
     
     if sec_etiket:
         s = next(s for s in siparisler if f"{s[1]} - {s[3]} ({s[2]})" == sec_etiket)
-        if st.button("❌ Bu Siparişi Tamamen Sil", use_container_width=True):
-            conn.execute("DELETE FROM siparis_gecmisi WHERE id=?", (s[0],))
-            conn.commit(); st.error("🗑️ Sipariş silindi!"); st.rerun()
+        
+        c1, c2 = st.columns(2)
+        
+        if c1.button("🔄 İrsaliyeyi Tekrar Çıkar (Yeni Formatla)", use_container_width=True):
+            try:
+                cart_items = json.loads(s[6])
+                raw_tot = sum([i['line_total'] for i in cart_items])
+                jpeg_re = create_invoice_jpeg(s[1], s[2], s[3], s[4], s[5], cart_items, s[9], raw_tot, s[8])
+                st.image(jpeg_re, caption=f"Yeniden Çıkarılan Fiş: {s[1]}", width=450)
+                st.download_button("📥 Yeni Formatlı Fişi İndir", jpeg_re, f"Re_{s[1]}.jpg", "image/jpeg", use_container_width=True)
+            except Exception as e:
+                st.warning("⚠️ Bu sipariş çok eski bir formatta kaydedildiği için detayları okunamıyor.")
+
+        if c2.button("❌ Bu Siparişi Tamamen Sil", use_container_width=True):
+            with get_db_conn() as conn:
+                conn.execute("DELETE FROM siparis_gecmisi WHERE id=?", (s[0],))
+                conn.commit()
+            st.error("🗑️ Sipariş arşivden tamamen silindi!"); st.rerun()
 
 def mod_crm():
     st.header("📇 Müşteriler (CRM)")
     with st.form("yeni_m"):
         isim, tel, adres = st.text_input("Adı*"), st.text_input("Tel"), st.text_area("Adres")
         if st.form_submit_button("Kaydet") and isim:
-            conn.execute("INSERT INTO musteriler (isim, telefon, adres) VALUES (?,?,?)", (isim, tel, adres))
-            conn.commit(); st.success("Eklendi!"); st.rerun()
+            with get_db_conn() as conn:
+                conn.execute("INSERT INTO musteriler (isim, telefon, adres) VALUES (?,?,?)", (isim, tel, adres))
+                conn.commit()
+            st.success("Eklendi!"); st.rerun()
 
 def mod_ayarlar():
     st.header("⚙️ Ayarlar")
