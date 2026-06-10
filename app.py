@@ -12,22 +12,32 @@ import json
 import qrcode
 import random
 
-# Sayfa Yapılandırması
+# --- SAYFA VE ARAYÜZ YAPILANDIRMASI ---
 st.set_page_config(page_title="Mirrorprive_otomasyon", layout="wide")
 
 if not os.path.exists("urun_resimleri"): os.makedirs("urun_resimleri")
 
-# CSS: Hızlı ve hafif arayüz
 st.markdown("""
 <style>
-    html, body, .stApp { font-family: 'Montserrat', sans-serif !important; }
-    .stButton > button { border-radius: 0px !important; width: 100%; }
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&display=swap');
+    html, body, .stApp, p, h1, h2, h3, h4, h5, h6 { font-family: 'Montserrat', sans-serif !important; }
+    .stButton > button { border-radius: 0px !important; width: 100%; font-weight: 600; letter-spacing: 1px; }
+    div[data-testid="stMetricValue"] { font-size: 1.8rem !important; color: #1f2937; }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("Mirrorprive_otomasyon B2B Yönetim Sistemi")
 
-# --- VERİTABANI BAĞLANTISI (TEK KANAL - ANTI CRASH) ---
+# --- KURLAR VE VERİTABANI (ANTI-CRASH) ---
+@st.cache_data(ttl=3600)
+def kurlari_getir():
+    try:
+        r = requests.get("https://api.exchangerate-api.com/v4/latest/USD").json()
+        return r["rates"]["TRY"], (r["rates"]["TRY"] / r["rates"]["EUR"]), r["rates"]["USD"]
+    except: return 0, 0, 0
+
+usd_kur, eur_kur, _ = kurlari_getir()
+
 @st.cache_resource
 def get_db_conn():
     conn = sqlite3.connect('mirrorbrand_stok.db', check_same_thread=False, timeout=30.0)
@@ -39,8 +49,7 @@ def get_db_conn():
 
 conn = get_db_conn()
 
-# --- YARDIMCI MOTORLAR ---
-
+# --- ETİKET VE İRSALİYE MOTORLARI ---
 def profesyonel_etiket_olustur(barkod, isim):
     kesin_barkod = str(barkod).strip()
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=20, border=2)
@@ -49,8 +58,6 @@ def profesyonel_etiket_olustur(barkod, isim):
     qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
     qr_w, qr_h = qr_img.size
-    
-    # ETİKET KESİLME SORUNU ÇÖZÜMÜ: Kanvas yüksekliği 200'den 260'a çıkarıldı.
     etiket_w, etiket_h = qr_w + 120, qr_h + 260 
     etiket_img = Image.new('RGB', (etiket_w, etiket_h), 'white')
     draw = ImageDraw.Draw(etiket_img)
@@ -60,7 +67,6 @@ def profesyonel_etiket_olustur(barkod, isim):
     for p in font_paths:
         try:
             f_mirror = ImageFont.truetype(p, 75)
-            # İsim fontu 50'den 45'e çekildi ki uzun isimler yatayda rahat sığsın
             f_isim = ImageFont.truetype(p, 45)
             break
         except: continue
@@ -72,10 +78,8 @@ def profesyonel_etiket_olustur(barkod, isim):
         except: w = 100 
         draw.text(((etiket_w - w) / 2, y_pos), metin, fill=fill, font=font)
 
-    # Y koordinatları rahatlatıldı
     metni_ortala(40, "M I R R O R", f_mirror, fill="black")
     etiket_img.paste(qr_img, ((etiket_w - qr_w) // 2, 140))
-    # Alt metin QR'dan tam 30 piksel aşağıya, güvenli bölgeye yerleştirildi
     metni_ortala(140 + qr_h + 30, str(isim)[:30], f_isim, fill="black")
     
     with io.BytesIO() as buf:
@@ -140,15 +144,9 @@ def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items
     draw.text((450, y), f"NET TOTAL: {discounted_total:.2f} {sym}", fill=(34,139,34), font=f_net); y += 65
     
     eq_try, eq_usd, eq_eur = 0, 0, 0
-    # Kurları anlık olarak en üstteki fonksiyondan alıyoruz
-    try:
-        usd_rate, eur_rate, _ = kurlari_getir()
-    except:
-        usd_rate, eur_rate = 0, 0
-
-    if "USD" in currency: eq_try = discounted_total * usd_rate; eq_eur = eq_try / eur_rate if eur_rate > 0 else 0
-    elif "EUR" in currency: eq_try = discounted_total * eur_rate; eq_usd = eq_try / usd_rate if usd_rate > 0 else 0
-    else: eq_usd = discounted_total / usd_rate if usd_rate > 0 else 0; eq_eur = discounted_total / eur_rate if eur_rate > 0 else 0
+    if "USD" in currency: eq_try = discounted_total * usd_kur; eq_eur = eq_try / eur_kur if eur_kur > 0 else 0
+    elif "EUR" in currency: eq_try = discounted_total * eur_kur; eq_usd = eq_try / usd_kur if usd_kur > 0 else 0
+    else: eq_usd = discounted_total / usd_kur if usd_kur > 0 else 0; eq_eur = discounted_total / eur_kur if eur_kur > 0 else 0
 
     if eq_usd: draw.text((450, y), f"Eq USD: {eq_usd:.2f} $", fill=(120,120,120), font=f_norm); y += 35
     if eq_eur: draw.text((450, y), f"Eq EUR: {eq_eur:.2f} €", fill=(120,120,120), font=f_norm); y += 35
@@ -162,7 +160,9 @@ def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items
     return res_data
 
 
-# --- MODÜLLER ---
+# ==========================================
+# ANA SİSTEM MODÜLLERİ
+# ==========================================
 
 def mod_anasayfa():
     st.header("📊 Yönetim Paneli (Kokpit)")
@@ -171,17 +171,12 @@ def mod_anasayfa():
     
     if df_sip.empty: return st.info("Henüz satış verisi bulunmuyor.")
 
-    try:
-        usd_rate, eur_rate, _ = kurlari_getir()
-    except:
-        usd_rate, eur_rate = 1, 1
-
     toplam_ciro_usd, toplam_satilan_adet = 0, df_sip['toplam_adet'].sum()
     for _, r in df_sip.iterrows():
         t = r['toplam_tutar']
         if "USD" in r['para_birimi']: toplam_ciro_usd += t
-        elif "EUR" in r['para_birimi'] and eur_rate > 0: toplam_ciro_usd += (t * eur_rate) / usd_rate
-        elif "TRY" in r['para_birimi'] and usd_rate > 0: toplam_ciro_usd += t / usd_rate
+        elif "EUR" in r['para_birimi'] and eur_kur > 0: toplam_ciro_usd += (t * eur_kur) / usd_kur
+        elif "TRY" in r['para_birimi'] and usd_kur > 0: toplam_ciro_usd += t / usd_kur
 
     m1, m2, m3 = st.columns(3)
     m1.metric("💰 Toplam Satış Hacmi", f"{toplam_ciro_usd:,.2f} $")
@@ -210,20 +205,57 @@ def mod_anasayfa():
             df_pop = df_pop.sort_values(by='Satılan Seri', ascending=False).head(5)
             st.dataframe(df_pop, use_container_width=True, hide_index=True)
 
+
+# --- YENİLENEN VE DETAYLANDIRILAN STOK VİTRİNİ ---
 def mod_stok_durumu():
-    st.header("Mevcut Toptan Stoklar (Grid Vitrin)")
+    st.header("📦 Mevcut Toptan Stoklar (Vitrin ve Finansal Özet)")
     with get_db_conn() as conn:
         df = pd.read_sql_query("SELECT * FROM urunler", conn)
+        
     if df.empty: return st.info("Sistemde henüz ürün yok.")
         
-    f1, f2, f3 = st.columns([2, 1, 1])
-    arama = f1.text_input("🔍 Arama Yap")
-    kategoriler = ["Tüm Markalar"] + sorted(list(set([str(x).split()[0].upper() for x in df['isim'] if pd.notna(x) and str(x).strip() != ""])))
-    sec_kat = f2.selectbox("🏷️ Kategori Seç", kategoriler)
-    sirala = f3.selectbox("↕️ Sıralama", ["Yeniden Eskiye", "Alfabetik (A-Z)", "Fiyat (Düşükten Yükseğe)", "Stok (Azdan Çoğa)"])
+    # 1. DEPO FİNANSAL ÖZETİ
+    st.subheader("🏦 Depo Finansal Özeti")
+    toplam_model = len(df)
+    toplam_seri = df['stok_seri'].sum()
+    df['toplam_deger'] = df['seri_adedi'] * df['stok_seri'] * df['fiyat']
+    
+    tahmini_usd_deger = 0
+    if usd_kur > 0:
+        for _, r in df.iterrows():
+            if "USD" in r['para_birimi']: tahmini_usd_deger += r['toplam_deger']
+            elif "EUR" in r['para_birimi']: tahmini_usd_deger += (r['toplam_deger'] * eur_kur) / usd_kur
+            elif "TRY" in r['para_birimi']: tahmini_usd_deger += r['toplam_deger'] / usd_kur
+            
+    d1, d2, d3 = st.columns(3)
+    with d1: st.metric("📦 Toplam Model", f"{toplam_model} Çeşit")
+    with d2: st.metric("🔢 Toplam Depo Stoğu", f"{toplam_seri} Seri")
+    with d3: st.metric("💰 Toplam Tahmini Değer", f"{tahmini_usd_deger:,.2f} $")
+    st.divider()
 
-    if sec_kat != "Tüm Markalar": df = df[df['isim'].str.upper().str.startswith(sec_kat)]
-    if arama: df = df[df['isim'].str.contains(arama, case=False, na=False) | df['barkod'].str.contains(arama, case=False, na=False)]
+    # 2. GELİŞMİŞ FİLTRELEME
+    f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
+    arama = f1.text_input("🔍 Arama Yap (İsim veya Kod)")
+    
+    kategoriler = ["Tüm Markalar"] + sorted(list(set([str(x).split()[0].upper() for x in df['isim'] if pd.notna(x) and str(x).strip() != ""])))
+    sec_kat = f2.selectbox("🏷️ Marka Seç", kategoriler)
+    
+    # Yeni Ürün Tipi Filtresi
+    turler = ["Tümü", "T-Shirt", "Şort", "Polo"]
+    sec_tur = f3.selectbox("👕 Tür Seç", turler)
+    
+    sirala = f4.selectbox("↕️ Sıralama", ["Yeniden Eskiye", "Alfabetik (A-Z)", "Fiyat (Düşükten Yükseğe)", "Stok (Azdan Çoğa)"])
+
+    # Filtre İşlemleri
+    if sec_kat != "Tüm Markalar": 
+        df = df[df['isim'].str.upper().str.startswith(sec_kat)]
+    if sec_tur == "T-Shirt": 
+        df = df[df['isim'].str.contains("t-shirt|t shirt|tshirt", case=False, regex=True, na=False)]
+    elif sec_tur != "Tümü": 
+        df = df[df['isim'].str.contains(sec_tur, case=False, na=False)]
+    if arama: 
+        df = df[df['isim'].str.contains(arama, case=False, na=False) | df['barkod'].str.contains(arama, case=False, na=False)]
+        
     if sirala == "Alfabetik (A-Z)": df = df.sort_values(by='isim')
     elif sirala == "Fiyat (Düşükten Yükseğe)": df = df.sort_values(by='fiyat')
     elif sirala == "Stok (Azdan Çoğa)": df = df.sort_values(by='stok_seri')
@@ -242,6 +274,7 @@ def mod_stok_durumu():
     st.divider()
     df_sayfa = df.iloc[(aktif_sayfa - 1) * URUN_SAYISI : aktif_sayfa * URUN_SAYISI].reset_index(drop=True)
 
+    # 3. KUSURSUZ GRID YAPISI (Görseli eksik ürünler sistemi kilitletmez)
     for i in range(0, len(df_sayfa), 3):
         cols = st.columns(3)
         for j in range(3):
@@ -249,13 +282,16 @@ def mod_stok_durumu():
                 row = df_sayfa.iloc[i+j]
                 with cols[j]:
                     with st.container(border=True):
-                        if row['resim_url']:
-                            try: st.image(row['resim_url'], use_container_width=True)
-                            except: st.error("Resim bulunamadı.")
+                        if row['resim_url'] and os.path.exists(row['resim_url']):
+                            st.image(row['resim_url'], use_container_width=True)
+                        else:
+                            st.info("Görsel Yok")
                         
                         st.subheader(row['isim'])
                         st.write(f"**Kod:** {row['barkod']} | **Fiyat:** {row['fiyat']} {row['para_birimi']}")
-                        st.write(f"**Stok:** {row['stok_seri']} Seri | **Seri İçi:** {row['seri_adedi']} Adet")
+                        
+                        stok_durum = "🔴 Kritik" if row['stok_seri'] < 3 else "🟢 Yeterli"
+                        st.write(f"**Stok:** {row['stok_seri']} Seri ({stok_durum}) | **İçi:** {row['seri_adedi']} Adet")
                         
                         bc1, bc2 = st.columns(2)
                         with bc1:
@@ -270,7 +306,7 @@ def mod_stok_durumu():
                         
                         with st.expander("✏️ Düzenle"):
                             with st.form(key=f"edit_{row['id']}"):
-                                e_isim = st.text_input("Model Kodu", row['isim'])
+                                e_isim = st.text_input("Model", row['isim'])
                                 e_barkod = st.text_input("Barkod (Zorunlu)", row['barkod'])
                                 e_resim = st.file_uploader("📸 Yeni Fotoğraf", type=['png', 'jpg', 'jpeg'])
                                 
@@ -298,21 +334,21 @@ def mod_stok_durumu():
                                         st.success("Kaydedildi!"); st.rerun()
 
 def mod_yeni_urun():
-    st.header("Yeni Ürün Tanımla")
+    st.header("➕ Yeni Ürün Tanımla")
     with st.form("urun_ekle"):
-        isim = st.text_input("Ürün İsmi")
+        isim = st.text_input("Ürün İsmi (Örn: Balenciaga Siyah T-Shirt)")
         barkod = st.text_input("Barkod (Boş bırakırsanız otomatik atanır)")
-        resim = st.file_uploader("📸 Fotoğraf", type=['png', 'jpg', 'jpeg'])
+        resim = st.file_uploader("📸 Fotoğraf (Zorunlu Değil)", type=['png', 'jpg', 'jpeg'])
         
         c1, c2 = st.columns(2)
-        seri, stok = c1.selectbox("Seri Adedi", [4,5,6,7,8,10,12]), c1.number_input("Stok", min_value=0)
-        para, fiyat = c2.selectbox("Birim", ["USD ($)", "EUR (€)", "TRY (₺)"]), c2.number_input("Fiyat", min_value=0.0)
+        seri, stok = c1.selectbox("Seri Adedi", [4,5,6,7,8,10,12]), c1.number_input("Depoya Girecek Stok (Seri)", min_value=0)
+        para, fiyat = c2.selectbox("Birim", ["USD ($)", "EUR (€)", "TRY (₺)"]), c2.number_input("Satış Fiyatı", min_value=0.0)
         
-        if st.form_submit_button("Kaydet") and isim:
+        if st.form_submit_button("Ürünü Kaydet") and isim:
             with get_db_conn() as conn:
                 if not barkod.strip(): barkod = f"MB-{random.randint(100000, 999999)}"
                 mevcut = conn.execute("SELECT id FROM urunler WHERE barkod=?", (barkod.strip(),)).fetchone()
-                if mevcut: st.error("Barkod kayıtlı!")
+                if mevcut: st.error("⚠️ Bu barkod sistemde zaten kayıtlı!")
                 else:
                     yol = ""
                     if resim:
@@ -322,7 +358,7 @@ def mod_yeni_urun():
                         img_up.save(yol, "JPEG", optimize=True, quality=85)
                     conn.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod.strip(), isim, yol, seri, stok, fiyat, para))
                     conn.commit()
-            st.success(f"Eklendi! (Kod: {barkod.strip()})")
+            st.success(f"✅ Ürün başarıyla eklendi! (Kod: {barkod.strip()})")
 
 @st.cache_data(ttl=60)
 def dropdown_icin_urunleri_getir():
@@ -330,7 +366,6 @@ def dropdown_icin_urunleri_getir():
         tum_urunler = conn.execute("SELECT barkod, isim, fiyat, para_birimi FROM urunler ORDER BY isim").fetchall()
     return [f"{u[0]} - {u[1]} ({u[2]} {u[3]})" for u in tum_urunler]
 
-# --- SATIŞ EKRANI (HAFİF, HIZLI, CRASH-FREE) ---
 if 'sepet' not in st.session_state: st.session_state.sepet = []
 if 'son_satis_fisi' not in st.session_state: st.session_state.son_satis_fisi = None
 
