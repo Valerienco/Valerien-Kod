@@ -240,7 +240,6 @@ def mod_stok_durumu():
     kategoriler = ["Tüm Markalar"] + sorted(list(set([str(x).split()[0].upper() for x in df['isim'] if pd.notna(x) and str(x).strip() != ""])))
     sec_kat = f2.selectbox("🏷️ Marka Seç", kategoriler)
     
-    # Yeni Ürün Tipi Filtresi
     turler = ["Tümü", "T-Shirt", "Şort", "Polo"]
     sec_tur = f3.selectbox("👕 Tür Seç", turler)
     
@@ -249,10 +248,18 @@ def mod_stok_durumu():
     # Filtre İşlemleri
     if sec_kat != "Tüm Markalar": 
         df = df[df['isim'].str.upper().str.startswith(sec_kat)]
+        
+    # --- YENİ T-SHIRT MANTIĞI BURADA ---
     if sec_tur == "T-Shirt": 
-        df = df[df['isim'].str.contains("t-shirt|t shirt|tshirt", case=False, regex=True, na=False)]
+        # Adında t-shirt yazanları VEYA adında şort/polo geçmeyenleri (eski ürünleri) al
+        mask_tshirt = df['isim'].str.contains("t-shirt|t shirt|tshirt", case=False, regex=True, na=False)
+        mask_diger = ~df['isim'].str.contains("şort|sort|polo", case=False, regex=True, na=False)
+        df = df[mask_tshirt | mask_diger]
+    elif sec_tur == "Şort":
+        df = df[df['isim'].str.contains("şort|sort", case=False, regex=True, na=False)]
     elif sec_tur != "Tümü": 
         df = df[df['isim'].str.contains(sec_tur, case=False, na=False)]
+        
     if arama: 
         df = df[df['isim'].str.contains(arama, case=False, na=False) | df['barkod'].str.contains(arama, case=False, na=False)]
         
