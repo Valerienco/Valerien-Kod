@@ -240,7 +240,8 @@ def mod_stok_durumu():
     kategoriler = ["Tüm Markalar"] + sorted(list(set([str(x).split()[0].upper() for x in df['isim'] if pd.notna(x) and str(x).strip() != ""])))
     sec_kat = f2.selectbox("🏷️ Marka Seç", kategoriler)
     
-    turler = ["Tümü", "T-Shirt", "Şort", "Polo"]
+    # TÜRLERE TAKIM EKLENDİ
+    turler = ["Tümü", "T-Shirt", "Şort", "Polo", "Takım"]
     sec_tur = f3.selectbox("👕 Tür Seç", turler)
     
     sirala = f4.selectbox("↕️ Sıralama", ["Yeniden Eskiye", "Alfabetik (A-Z)", "Fiyat (Düşükten Yükseğe)", "Stok (Azdan Çoğa)"])
@@ -249,14 +250,17 @@ def mod_stok_durumu():
     if sec_kat != "Tüm Markalar": 
         df = df[df['isim'].str.upper().str.startswith(sec_kat)]
         
-    # --- YENİ T-SHIRT MANTIĞI BURADA ---
+    # --- YENİ T-SHIRT VE TAKIM MANTIĞI BURADA ---
     if sec_tur == "T-Shirt": 
-        # Adında t-shirt yazanları VEYA adında şort/polo geçmeyenleri (eski ürünleri) al
+        # Adında t-shirt yazanları VEYA adında şort/polo/takım geçmeyenleri (eski ürünleri) al
         mask_tshirt = df['isim'].str.contains("t-shirt|t shirt|tshirt", case=False, regex=True, na=False)
-        mask_diger = ~df['isim'].str.contains("şort|sort|polo", case=False, regex=True, na=False)
+        mask_diger = ~df['isim'].str.contains("şort|sort|polo|takım|takim|set", case=False, regex=True, na=False)
         df = df[mask_tshirt | mask_diger]
     elif sec_tur == "Şort":
         df = df[df['isim'].str.contains("şort|sort", case=False, regex=True, na=False)]
+    elif sec_tur == "Takım":
+        # Adında takım, takim veya set geçenleri getirir
+        df = df[df['isim'].str.contains("takım|takim|set", case=False, regex=True, na=False)]
     elif sec_tur != "Tümü": 
         df = df[df['isim'].str.contains(sec_tur, case=False, na=False)]
         
@@ -281,7 +285,7 @@ def mod_stok_durumu():
     st.divider()
     df_sayfa = df.iloc[(aktif_sayfa - 1) * URUN_SAYISI : aktif_sayfa * URUN_SAYISI].reset_index(drop=True)
 
-    # 3. KUSURSUZ GRID YAPISI (Görseli eksik ürünler sistemi kilitletmez)
+    # 3. KUSURSUZ GRID YAPISI
     for i in range(0, len(df_sayfa), 3):
         cols = st.columns(3)
         for j in range(3):
