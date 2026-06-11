@@ -11,6 +11,7 @@ import urllib.parse
 import json
 import qrcode
 import random
+import gc  # RAM TEMİZLEYİCİ EKLENDİ
 
 # --- SAYFA VE ARAYÜZ YAPILANDIRMASI ---
 st.set_page_config(page_title="Mirrorprive_otomasyon", layout="wide")
@@ -206,7 +207,6 @@ def mod_anasayfa():
             st.dataframe(df_pop, use_container_width=True, hide_index=True)
 
 
-# --- YENİLENEN VE DETAYLANDIRILAN STOK VİTRİNİ ---
 def mod_stok_durumu():
     st.header("📦 Mevcut Toptan Stoklar (Vitrin ve Finansal Özet)")
     with get_db_conn() as conn:
@@ -214,7 +214,7 @@ def mod_stok_durumu():
         
     if df.empty: return st.info("Sistemde henüz ürün yok.")
         
-    # 1. DEPO FİNANSAL ÖZETİ
+    # DEPO FİNANSAL ÖZETİ
     st.subheader("🏦 Depo Finansal Özeti")
     toplam_model = len(df)
     toplam_seri = df['stok_seri'].sum()
@@ -233,33 +233,28 @@ def mod_stok_durumu():
     with d3: st.metric("💰 Toplam Tahmini Değer", f"{tahmini_usd_deger:,.2f} $")
     st.divider()
 
-    # 2. GELİŞMİŞ FİLTRELEME
+    # GELİŞMİŞ FİLTRELEME
     f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
     arama = f1.text_input("🔍 Arama Yap (İsim veya Kod)")
     
     kategoriler = ["Tüm Markalar"] + sorted(list(set([str(x).split()[0].upper() for x in df['isim'] if pd.notna(x) and str(x).strip() != ""])))
     sec_kat = f2.selectbox("🏷️ Marka Seç", kategoriler)
     
-    # TÜRLERE TAKIM EKLENDİ
     turler = ["Tümü", "T-Shirt", "Şort", "Polo", "Takım"]
     sec_tur = f3.selectbox("👕 Tür Seç", turler)
     
     sirala = f4.selectbox("↕️ Sıralama", ["Yeniden Eskiye", "Alfabetik (A-Z)", "Fiyat (Düşükten Yükseğe)", "Stok (Azdan Çoğa)"])
 
-    # Filtre İşlemleri
     if sec_kat != "Tüm Markalar": 
         df = df[df['isim'].str.upper().str.startswith(sec_kat)]
         
-    # --- YENİ T-SHIRT VE TAKIM MANTIĞI BURADA ---
     if sec_tur == "T-Shirt": 
-        # Adında t-shirt yazanları VEYA adında şort/polo/takım geçmeyenleri (eski ürünleri) al
         mask_tshirt = df['isim'].str.contains("t-shirt|t shirt|tshirt", case=False, regex=True, na=False)
         mask_diger = ~df['isim'].str.contains("şort|sort|polo|takım|takim|set", case=False, regex=True, na=False)
         df = df[mask_tshirt | mask_diger]
     elif sec_tur == "Şort":
         df = df[df['isim'].str.contains("şort|sort", case=False, regex=True, na=False)]
     elif sec_tur == "Takım":
-        # Adında takım, takim veya set geçenleri getirir
         df = df[df['isim'].str.contains("takım|takim|set", case=False, regex=True, na=False)]
     elif sec_tur != "Tümü": 
         df = df[df['isim'].str.contains(sec_tur, case=False, na=False)]
@@ -285,7 +280,6 @@ def mod_stok_durumu():
     st.divider()
     df_sayfa = df.iloc[(aktif_sayfa - 1) * URUN_SAYISI : aktif_sayfa * URUN_SAYISI].reset_index(drop=True)
 
-    # 3. KUSURSUZ GRID YAPISI
     for i in range(0, len(df_sayfa), 3):
         cols = st.columns(3)
         for j in range(3):
@@ -377,8 +371,14 @@ def dropdown_icin_urunleri_getir():
         tum_urunler = conn.execute("SELECT barkod, isim, fiyat, para_birimi FROM urunler ORDER BY isim").fetchall()
     return [f"{u[0]} - {u[1]} ({u[2]} {u[3]})" for u in tum_urunler]
 
+
+# ==========================================
+# RAM KONTROLLÜ SATIŞ VE KAMERA MOTORU
+# ==========================================
 if 'sepet' not in st.session_state: st.session_state.sepet = []
 if 'son_satis_fisi' not in st.session_state: st.session_state.son_satis_fisi = None
+if 'cam_key' not in st.session_state: st.session_state.cam_key = 0
+if 'son_islem_mesaji' not in st.session_state: st.session_state.son_islem_mesaji = None
 
 def mod_satis_ekrani():
     if st.session_state.get('son_satis_fisi'):
@@ -392,35 +392,59 @@ def mod_satis_ekrani():
 
     st.header("Hızlı Satış Ekranı")
     
+    # Başarı mesajını ekran yenilendikten sonra da göstermek için:
+    if st.session_state.son_islem_mesaji:
+        st.success(st.session_state.son_islem_mesaji)
+        st.session_state.son_islem_mesaji = None
+
     tab1, tab2 = st.tabs(["📷 Kamerayla Okut", "📝 Listeden Seçerek Ekle"])
     
     with tab1:
-        st.info("💡 Ürün QR'ını kameraya okutun. Ürün anında sepete eklenecektir.")
-        kamera = st.camera_input("📷 QR Okuyucu", key="kamera_input")
+        st.info("💡 Ürün QR'ını kameraya okutun. Okunduktan sonra kamera kendini RAM'den temizleyip yenileyecektir.")
+        
+        # DİNAMİK KAMERA: Her başarılı okumada kamera id'si değişir ve eski RAM tamamen yok edilir.
+        kamera = st.camera_input("📷 QR Okuyucu", key=f"kamera_modulu_{st.session_state.cam_key}")
+        
         if kamera:
-            decoded = decode(Image.open(kamera))
-            if decoded: 
-                barkod = decoded[0].data.decode()
-                with get_db_conn() as conn:
-                    urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
-                if urun:
-                    var_mi = False
-                    for item in st.session_state.sepet:
-                        if item['id'] == urun[0]:
-                            item['seri_miktar'] += 1
-                            item['pcs'] = item['seri_miktar'] * item['seri_ici_adet']
-                            item['line_total'] = item['pcs'] * item['birim_fiyat']
-                            var_mi = True
-                            break
-                    if not var_mi:
-                        st.session_state.sepet.append({
-                            'id': urun[0], 'isim': urun[2], 'resim_url': urun[3], 
-                            'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 
-                            'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]
-                        })
-                    st.success(f"✅ {urun[2]} sepete eklendi!")
-                else: st.error("❌ Bu barkoda ait ürün sistemde bulunamadı.")
-            else: st.warning("⚠️ Barkod net okunamadı, tekrar çekin.")
+            try:
+                with Image.open(kamera) as img:
+                    decoded = decode(img)
+                    
+                if decoded: 
+                    barkod = decoded[0].data.decode()
+                    with get_db_conn() as conn:
+                        urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
+                        
+                    if urun:
+                        var_mi = False
+                        for item in st.session_state.sepet:
+                            if item['id'] == urun[0]:
+                                item['seri_miktar'] += 1
+                                item['pcs'] = item['seri_miktar'] * item['seri_ici_adet']
+                                item['line_total'] = item['pcs'] * item['birim_fiyat']
+                                var_mi = True
+                                break
+                        if not var_mi:
+                            st.session_state.sepet.append({
+                                'id': urun[0], 'isim': urun[2], 'resim_url': urun[3], 
+                                'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 
+                                'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]
+                            })
+                            
+                        st.session_state.son_islem_mesaji = f"✅ {urun[2]} sepete eklendi!"
+                        
+                        # --- İMHA PROTOKOLÜ BAŞLANGICI ---
+                        st.session_state.cam_key += 1  # Kamera kimliğini değiştir
+                        del kamera # Veriyi uçur
+                        gc.collect() # İşletim sistemine RAM'i zorla boşalttır
+                        st.rerun() # Sayfayı anında tertemiz yeniden yükle
+                        # --------------------------------
+                    else: 
+                        st.error("❌ Bu barkoda ait ürün sistemde bulunamadı.")
+                else: 
+                    st.warning("⚠️ Barkod net okunamadı, tekrar çekin.")
+            except Exception as e:
+                st.error("Kamera işlemi sırasında bir takılma oldu, sayfayı yenileyin.")
 
     with tab2:
         st.info("💡 Veritabanındaki ürünleri buradan arayıp ekleyebilirsiniz.")
@@ -521,7 +545,7 @@ def mod_satis_ekrani():
                         "file_name": f"{sip_no}.jpg", "siparis_no": sip_no, "telefon": m_tel,
                         "wa_url": f"https://wa.me/{"".join(filter(str.isdigit, m_tel))}?text={wa_msg}" if m_tel else ""
                     }
-                    st.session_state.sepet = []; st.rerun()
+                    st.session_state.sepet = []; st.session_state.islenen_qr_kodu = None; st.rerun()
                 except Exception as e:
                     st.error("Sistem yoğunluğu yaşandı, lütfen tekrar deneyin.")
 
