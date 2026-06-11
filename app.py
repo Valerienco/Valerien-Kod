@@ -11,7 +11,7 @@ import urllib.parse
 import json
 import qrcode
 import random
-import gc  # RAM TEMİZLEYİCİ EKLENDİ
+import gc
 
 # --- SAYFA VE ARAYÜZ YAPILANDIRMASI ---
 st.set_page_config(page_title="Mirrorprive_otomasyon", layout="wide")
@@ -373,7 +373,7 @@ def dropdown_icin_urunleri_getir():
 
 
 # ==========================================
-# RAM KONTROLLÜ SATIŞ VE KAMERA MOTORU
+# HAFIZA SIZINTISIZ (KUSURSUZ) SATIŞ EKRANI
 # ==========================================
 if 'sepet' not in st.session_state: st.session_state.sepet = []
 if 'son_satis_fisi' not in st.session_state: st.session_state.son_satis_fisi = None
@@ -392,7 +392,6 @@ def mod_satis_ekrani():
 
     st.header("Hızlı Satış Ekranı")
     
-    # Başarı mesajını ekran yenilendikten sonra da göstermek için:
     if st.session_state.son_islem_mesaji:
         st.success(st.session_state.son_islem_mesaji)
         st.session_state.son_islem_mesaji = None
@@ -400,9 +399,15 @@ def mod_satis_ekrani():
     tab1, tab2 = st.tabs(["📷 Kamerayla Okut", "📝 Listeden Seçerek Ekle"])
     
     with tab1:
-        st.info("💡 Ürün QR'ını kameraya okutun. Okunduktan sonra kamera kendini RAM'den temizleyip yenileyecektir.")
+        st.info("💡 Ürün QR'ını okutun. Sistem her okumadan sonra eski veriyi kökten silecektir.")
         
-        # DİNAMİK KAMERA: Her başarılı okumada kamera id'si değişir ve eski RAM tamamen yok edilir.
+        # --- HAFIZA SÜPÜRGESİ (GARBAGE COLLECTOR) ---
+        # 6. kamerada sistemin çökmesini engellemek için, eski kameraların anahtarlarını Streamlit hafızasından zorla kazıyoruz.
+        for k in list(st.session_state.keys()):
+            if k.startswith("kamera_modulu_") and k != f"kamera_modulu_{st.session_state.cam_key}":
+                del st.session_state[k]
+        # -------------------------------------------
+        
         kamera = st.camera_input("📷 QR Okuyucu", key=f"kamera_modulu_{st.session_state.cam_key}")
         
         if kamera:
@@ -433,12 +438,12 @@ def mod_satis_ekrani():
                             
                         st.session_state.son_islem_mesaji = f"✅ {urun[2]} sepete eklendi!"
                         
-                        # --- İMHA PROTOKOLÜ BAŞLANGICI ---
-                        st.session_state.cam_key += 1  # Kamera kimliğini değiştir
-                        del kamera # Veriyi uçur
-                        gc.collect() # İşletim sistemine RAM'i zorla boşalttır
-                        st.rerun() # Sayfayı anında tertemiz yeniden yükle
-                        # --------------------------------
+                        # --- KESİN İMHA PROTOKOLÜ ---
+                        st.session_state.cam_key += 1 
+                        del kamera 
+                        gc.collect() 
+                        st.rerun() 
+                        # ----------------------------
                     else: 
                         st.error("❌ Bu barkoda ait ürün sistemde bulunamadı.")
                 else: 
@@ -545,7 +550,7 @@ def mod_satis_ekrani():
                         "file_name": f"{sip_no}.jpg", "siparis_no": sip_no, "telefon": m_tel,
                         "wa_url": f"https://wa.me/{"".join(filter(str.isdigit, m_tel))}?text={wa_msg}" if m_tel else ""
                     }
-                    st.session_state.sepet = []; st.session_state.islenen_qr_kodu = None; st.rerun()
+                    st.session_state.sepet = []; st.rerun()
                 except Exception as e:
                     st.error("Sistem yoğunluğu yaşandı, lütfen tekrar deneyin.")
 
