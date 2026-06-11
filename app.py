@@ -29,11 +29,12 @@ st.markdown("""
 
 st.title("Mirrorprive_otomasyon B2B Yönetim Sistemi")
 
-# --- KURLAR VE VERİTABANI (ANTI-CRASH) ---
+# --- KURLAR VE VERİTABANI (HIZLANDIRILDI) ---
 @st.cache_data(ttl=3600)
 def kurlari_getir():
     try:
-        r = requests.get("https://api.exchangerate-api.com/v4/latest/USD").json()
+        # Sitenin ilk açılışta donmasını engellemek için 1.5 saniye sınır konuldu
+        r = requests.get("https://api.exchangerate-api.com/v4/latest/USD", timeout=1.5).json()
         return r["rates"]["TRY"], (r["rates"]["TRY"] / r["rates"]["EUR"]), r["rates"]["USD"]
     except: return 0, 0, 0
 
@@ -107,7 +108,7 @@ def create_invoice_jpeg(order_no, date_str, customer, phone, address, cart_items
         except: pass
 
     draw.text((50, y), "SALES ORDER RECEIPT", fill=(0,0,0), font=f_title); y += 60
-    draw.text((50, y), "MIRROR BRAND WHOLESALE", fill=(100,100,100), font=f_bold); y += 35
+    draw.text((50, y), "MIRROR PRIVE WHOLESALE", fill=(100,100,100), font=f_bold); y += 35
     draw.text((50, y), "WhatsApp: +90 (533) 577 72 92", fill=(37, 211, 102), font=f_bold); y += 45
     draw.line((50, y, 900, y), fill=(0,0,0), width=3); y += 25
     
@@ -207,7 +208,7 @@ def mod_anasayfa():
             st.dataframe(df_pop, use_container_width=True, hide_index=True)
 
 def mod_stok_durumu():
-    st.header("📦 Mevcut Toptan Stoklar (Vitrin ve Finansal Özet)")
+    st.header("📦 Mevcut Toptan Stoklar")
     with get_db_conn() as conn:
         df = pd.read_sql_query("SELECT * FROM urunler", conn)
         
@@ -233,13 +234,10 @@ def mod_stok_durumu():
 
     f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
     arama = f1.text_input("🔍 Arama Yap (İsim veya Kod)")
-    
     kategoriler = ["Tüm Markalar"] + sorted(list(set([str(x).split()[0].upper() for x in df['isim'] if pd.notna(x) and str(x).strip() != ""])))
     sec_kat = f2.selectbox("🏷️ Marka Seç", kategoriler)
-    
     turler = ["Tümü", "T-Shirt", "Şort", "Polo", "Takım"]
     sec_tur = f3.selectbox("👕 Tür Seç", turler)
-    
     sirala = f4.selectbox("↕️ Sıralama", ["Yeniden Eskiye", "Alfabetik (A-Z)", "Fiyat (Düşükten Yükseğe)", "Stok (Azdan Çoğa)"])
 
     if sec_kat != "Tüm Markalar": 
@@ -264,9 +262,9 @@ def mod_stok_durumu():
     elif sirala == "Stok (Azdan Çoğa)": df = df.sort_values(by='stok_seri')
     elif sirala == "Yeniden Eskiye": df = df.sort_values(by='id', ascending=False)
 
-    URUN_SAYISI = 24
+    # VİTRİN KASMASINI ENGELLEMEK İÇİN SAYFA BAŞI ÜRÜN 24'TEN 12'YE İNDİRİLDİ
+    URUN_SAYISI = 12
     top_sayfa = max(1, (len(df) + URUN_SAYISI - 1) // URUN_SAYISI)
-    
     st.write(f"**Bulunan Model:** {len(df)}")
     aktif_sayfa = 1
     if top_sayfa > 1:
@@ -311,7 +309,6 @@ def mod_stok_durumu():
                                 e_isim = st.text_input("Model", row['isim'])
                                 e_barkod = st.text_input("Barkod (Zorunlu)", row['barkod'])
                                 e_resim = st.file_uploader("📸 Yeni Fotoğraf", type=['png', 'jpg', 'jpeg'])
-                                
                                 c_1, c_2 = st.columns(2)
                                 e_seri = c_1.selectbox("Seri Adedi", [4,5,6,7,8,10,12], index=[4,5,6,7,8,10,12].index(row['seri_adedi']) if row['seri_adedi'] in [4,5,6,7,8,10,12] else 0)
                                 e_stok = c_1.number_input("Stok", value=int(row['stok_seri']))
@@ -329,7 +326,7 @@ def mod_stok_durumu():
                                                 if e_resim:
                                                     yeni_yol = f"urun_resimleri/{e_barkod.strip()}.jpg"
                                                     img_up = Image.open(e_resim).convert("RGB")
-                                                    img_up.thumbnail((800, 800))
+                                                    img_up.thumbnail((500, 500)) # Yeni fotoğraflar 500x500 olacak, hız artacak
                                                     img_up.save(yeni_yol, "JPEG", optimize=True, quality=85)
                                                 conn.execute("UPDATE urunler SET barkod=?, isim=?, resim_url=?, seri_adedi=?, stok_seri=?, fiyat=?, para_birimi=? WHERE id=?", (e_barkod.strip(), e_isim, yeni_yol, e_seri, e_stok, e_fiyat, e_para, int(row['id'])))
                                                 conn.commit()
@@ -341,7 +338,6 @@ def mod_yeni_urun():
         isim = st.text_input("Ürün İsmi (Örn: Balenciaga Siyah T-Shirt)")
         barkod = st.text_input("Barkod (Boş bırakırsanız otomatik atanır)")
         resim = st.file_uploader("📸 Fotoğraf (Zorunlu Değil)", type=['png', 'jpg', 'jpeg'])
-        
         c1, c2 = st.columns(2)
         seri, stok = c1.selectbox("Seri Adedi", [4,5,6,7,8,10,12]), c1.number_input("Depoya Girecek Stok (Seri)", min_value=0)
         para, fiyat = c2.selectbox("Birim", ["USD ($)", "EUR (€)", "TRY (₺)"]), c2.number_input("Satış Fiyatı", min_value=0.0)
@@ -356,7 +352,7 @@ def mod_yeni_urun():
                     if resim:
                         yol = f"urun_resimleri/{barkod.strip()}.jpg"
                         img_up = Image.open(resim).convert("RGB")
-                        img_up.thumbnail((800, 800))
+                        img_up.thumbnail((500, 500)) # Sıkıştırma boyutu küçültüldü
                         img_up.save(yol, "JPEG", optimize=True, quality=85)
                     conn.execute("INSERT INTO urunler (barkod, isim, resim_url, seri_adedi, stok_seri, fiyat, para_birimi) VALUES (?,?,?,?,?,?,?)", (barkod.strip(), isim, yol, seri, stok, fiyat, para))
                     conn.commit()
@@ -370,82 +366,98 @@ def dropdown_icin_urunleri_getir():
 
 
 # ==========================================
-# YÜKSEK HIZLI VE TERS LİSTELİ SATIŞ EKRANI
+# İPHONE (NATIVE) VE CANLI SATIŞ EKRANI
 # ==========================================
 if 'sepet' not in st.session_state: st.session_state.sepet = []
-if 'son_satis_fisi' not in st.session_state: st.session_state.son_satis_fisi = None
-if 'cam_key' not in st.session_state: st.session_state.cam_key = 0
-if 'son_islem_mesaji' not in st.session_state: st.session_state.son_islem_mesaji = None
+if 'son_islenen_qr_verisi' not in st.session_state: st.session_state.son_islenen_qr_verisi = None
+
+def urunu_sepete_ekle_ve_uste_cek(barkod, raw_veri=None):
+    with get_db_conn() as conn:
+        urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
+    
+    if urun:
+        var_mi = False
+        for i, item in enumerate(st.session_state.sepet):
+            if item['id'] == urun[0]:
+                item['seri_miktar'] += 1
+                item['pcs'] = item['seri_miktar'] * item['seri_ici_adet']
+                item['line_total'] = item['pcs'] * item['birim_fiyat']
+                guncel = st.session_state.sepet.pop(i)
+                st.session_state.sepet.insert(0, guncel) 
+                var_mi = True
+                break
+        if not var_mi:
+            st.session_state.sepet.insert(0, { 
+                'id': urun[0], 'isim': urun[2], 'resim_url': urun[3], 
+                'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 
+                'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]
+            })
+        st.success(f"✅ {urun[2]} başarıyla eklendi! Diğer ürüne geçmek için yukarıdaki yüklemeyi 'X' tuşuyla kapatın.")
+        if raw_veri:
+            st.session_state.son_islenen_qr_verisi = raw_veri
+    else:
+        st.error("❌ Bu barkoda ait ürün sistemde bulunamadı.")
+        if raw_veri:
+            st.session_state.son_islenen_qr_verisi = raw_veri
 
 def mod_satis_ekrani():
-    if st.session_state.get('son_satis_fisi'):
-        f = st.session_state.son_satis_fisi
-        st.success("✅ Satış arşive eklendi!"); st.image(f["jpeg_data"], width=400)
-        c1, c2, c3 = st.columns(3)
-        c1.download_button("📥 Fişi İndir", f["jpeg_data"], f["file_name"], "image/jpeg", use_container_width=True)
-        if f["telefon"]: c2.link_button("📲 WhatsApp'tan Gönder", f["wa_url"], use_container_width=True)
-        if c3.button("🔄 Yeni Satışa Başla", use_container_width=True): st.session_state.son_satis_fisi = None; st.rerun()
-        return
-
     st.header("Hızlı Satış Ekranı")
-    
-    if st.session_state.son_islem_mesaji:
-        st.success(st.session_state.son_islem_mesaji)
-        st.session_state.son_islem_mesaji = None
 
-    tab1, tab2 = st.tabs(["📷 Kamerayla Okut", "📝 Listeden Seçerek Ekle"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📱 iPhone Kamerası (Tam Stabil)", "📷 Canlı Kamera (PC/Android)", "🔫 Barkod Tabancası", "📝 Listeden Seç"])
     
     with tab1:
-        st.info("💡 Ürün QR'ını okutun. Yeni okutulan ürün listenin EN ÜSTÜNE eklenecektir.")
+        st.info("💡 **iPhone (iOS Safari) kullananlar için kesin çözümdür.** Cihazınızın donmasını tamamen engeller.\n\nAşağıdaki alana tıklayıp **'Fotoğraf Çek (Take Photo)'** diyerek ürünleri yorulmadan okutabilirsiniz.")
+        iphone_kamera = st.file_uploader("📸 Ürün QR Okut", type=['png', 'jpg', 'jpeg'], key="iphone_uploader")
         
-        # Sadece anahtarı bir artırmak yeterli, 'del' komutları Streamlit'in ön yüzünü donduruyordu, onu kaldırdık.
-        kamera = st.camera_input("📷 QR Okuyucu", key=f"kamera_modulu_{st.session_state.cam_key}")
-        
-        if kamera:
-            try:
-                # 1. OPTİMİZASYON: Fotoğrafı saniyesinde küçültüp siyah-beyaz yaparak okutuyoruz. (Hız x10 arttı)
-                with Image.open(kamera) as img:
-                    img_gray = img.convert('L')
-                    img_gray.thumbnail((800, 800))
-                    decoded = decode(img_gray)
+        if iphone_kamera:
+            veri = iphone_kamera.getvalue()
+            if st.session_state.son_islenen_qr_verisi != veri:
+                try:
+                    with Image.open(iphone_kamera) as img:
+                        img_gray = img.convert('L')
+                        img_gray.thumbnail((500, 500)) # Okuma hızı şimşek gibi olması için 500px'e düşürüldü
+                        decoded = decode(img_gray)
                     
-                if decoded: 
-                    barkod = decoded[0].data.decode()
-                    with get_db_conn() as conn:
-                        urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (barkod,)).fetchone()
-                        
-                    if urun:
-                        var_mi = False
-                        # 2. OPTİMİZASYON: Ürün zaten sepette varsa sayısını artırıp en üste (0. endeks) fırlatıyoruz.
-                        for i, item in enumerate(st.session_state.sepet):
-                            if item['id'] == urun[0]:
-                                item['seri_miktar'] += 1
-                                item['pcs'] = item['seri_miktar'] * item['seri_ici_adet']
-                                item['line_total'] = item['pcs'] * item['birim_fiyat']
-                                guncellenen_urun = st.session_state.sepet.pop(i)
-                                st.session_state.sepet.insert(0, guncellenen_urun)
-                                var_mi = True
-                                break
-                                
-                        if not var_mi:
-                            # Yeni ürün ekleniyorsa, listeye en üstten (0) giriyor.
-                            st.session_state.sepet.insert(0, {
-                                'id': urun[0], 'isim': urun[2], 'resim_url': urun[3], 
-                                'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 
-                                'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]
-                            })
-                            
-                        st.session_state.son_islem_mesaji = f"✅ {urun[2]} başarıyla eklendi!"
-                        st.session_state.cam_key += 1 
-                        st.rerun() 
-                    else: 
-                        st.error("❌ Bu barkoda ait ürün sistemde bulunamadı.")
-                else: 
-                    st.warning("⚠️ Barkod net okunamadı, tekrar çekin.")
-            except Exception as e:
-                st.error("Kamera işlemi sırasında bir takılma oldu, sayfayı yenileyin.")
+                    if decoded:
+                        barkod = decoded[0].data.decode()
+                        urunu_sepete_ekle_ve_uste_cek(barkod, veri)
+                    else:
+                        st.warning("⚠️ Barkod net okunamadı. Yüklediğiniz dosyayı 'X' ile silip tekrar fotoğraf çekin.")
+                        st.session_state.son_islenen_qr_verisi = veri
+                except Exception as e:
+                    st.error("Okuma sırasında hata oluştu.")
+                    st.session_state.son_islenen_qr_verisi = veri
 
     with tab2:
+        st.info("💡 PC veya Android cihazlarda hızlıca canlı yayından okutmak içindir. iPhone kullanıyorsanız sol sekmeyi tercih edin.")
+        canli_kamera = st.camera_input("📷 QR Canlı Okuyucu", key="canli_kamera")
+        
+        if canli_kamera:
+            veri = canli_kamera.getvalue()
+            if st.session_state.son_islenen_qr_verisi != veri:
+                try:
+                    with Image.open(canli_kamera) as img:
+                        img_gray = img.convert('L')
+                        img_gray.thumbnail((500, 500))
+                        decoded = decode(img_gray)
+                        
+                    if decoded: 
+                        barkod = decoded[0].data.decode()
+                        urunu_sepete_ekle_ve_uste_cek(barkod, veri)
+                    else: 
+                        st.warning("⚠️ Barkod okunamadı, tekrar çekin.")
+                        st.session_state.son_islenen_qr_verisi = veri
+                except Exception as e:
+                    st.error("Okuma hatası.")
+                    st.session_state.son_islenen_qr_verisi = veri
+
+    with tab3:
+        st.info("💡 Sisteme USB veya Bluetooth ile bağlayacağınız fiziksel okuyucu tabancayı kullanarak saniyede 3 ürün hızında tarama yapabilirsiniz.")
+        fiziksel_okuma = st.text_input("Barkodu Buraya Okutun", key="fiziksel_okuyucu_input")
+        if fiziksel_okuma:
+            urunu_sepete_ekle_ve_uste_cek(fiziksel_okuma.strip())
+
+    with tab4:
         st.info("💡 Veritabanındaki ürünleri buradan arayıp ekleyebilirsiniz.")
         urun_secenekleri = dropdown_icin_urunleri_getir()
         secilen_urun_str = st.selectbox("Eklenecek Ürünü Arayın veya Seçin", ["Lütfen Bir Ürün Seçin..."] + urun_secenekleri)
@@ -453,28 +465,8 @@ def mod_satis_ekrani():
         if st.button("➕ Seçili Ürünü Sepete Ekle", use_container_width=True):
             if secilen_urun_str != "Lütfen Bir Ürün Seçin...":
                 secilen_barkod = secilen_urun_str.split(" - ")[0]
-                with get_db_conn() as conn:
-                    urun = conn.execute("SELECT * FROM urunler WHERE barkod=?", (secilen_barkod,)).fetchone()
-                
-                if urun:
-                    var_mi = False
-                    for i, item in enumerate(st.session_state.sepet):
-                        if item['id'] == urun[0]:
-                            item['seri_miktar'] += 1
-                            item['pcs'] = item['seri_miktar'] * item['seri_ici_adet']
-                            item['line_total'] = item['pcs'] * item['birim_fiyat']
-                            guncellenen_urun = st.session_state.sepet.pop(i)
-                            st.session_state.sepet.insert(0, guncellenen_urun)
-                            var_mi = True
-                            break
-                    if not var_mi:
-                        st.session_state.sepet.insert(0, {
-                            'id': urun[0], 'isim': urun[2], 'resim_url': urun[3], 
-                            'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 
-                            'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]
-                        })
-                    st.success(f"✅ {urun[2]} sepete eklendi!")
-                    st.rerun()
+                urunu_sepete_ekle_ve_uste_cek(secilen_barkod)
+                st.rerun()
 
     st.divider()
     
@@ -541,17 +533,21 @@ def mod_satis_ekrani():
                         conn.commit()
                         
                     wa_msg = urllib.parse.quote(f"Hello {m_isim},\nYour order {sip_no} is confirmed! ✔️\nTotal: {disc_total:.2f} {p_birim}")
-                    st.session_state.son_satis_fisi = {
-                        "jpeg_data": create_invoice_jpeg(sip_no, tarih, m_isim, m_tel, m_adres, st.session_state.sepet, p_birim, raw_total, disc_total),
-                        "file_name": f"{sip_no}.jpg", "siparis_no": sip_no, "telefon": m_tel,
-                        "wa_url": f"https://wa.me/{"".join(filter(str.isdigit, m_tel))}?text={wa_msg}" if m_tel else ""
-                    }
-                    st.session_state.sepet = []; st.rerun()
+                    
+                    st.success("✅ Satış arşive eklendi!")
+                    yeni_fis = create_invoice_jpeg(sip_no, tarih, m_isim, m_tel, m_adres, st.session_state.sepet, p_birim, raw_total, disc_total)
+                    st.image(yeni_fis, width=400)
+                    st.download_button("📥 Fişi İndir", yeni_fis, f"{sip_no}.jpg", "image/jpeg", use_container_width=True)
+                    if m_tel:
+                        wa_url = f"https://wa.me/{"".join(filter(str.isdigit, m_tel))}?text={wa_msg}"
+                        st.link_button("📲 WhatsApp'tan Gönder", wa_url, use_container_width=True)
+
+                    st.session_state.sepet = []
                 except Exception as e:
                     st.error("Sistem yoğunluğu yaşandı, lütfen tekrar deneyin.")
 
     else:
-        st.info("Satış listesi boş. Kameradan ürün okutun veya listeden ürün seçin.")
+        st.info("Satış listesi boş.")
 
 def mod_gecmis():
     st.header("📂 Geçmiş Siparişler")
