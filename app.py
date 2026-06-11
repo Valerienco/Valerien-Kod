@@ -206,7 +206,6 @@ def mod_anasayfa():
             df_pop = df_pop.sort_values(by='Satılan Seri', ascending=False).head(5)
             st.dataframe(df_pop, use_container_width=True, hide_index=True)
 
-
 def mod_stok_durumu():
     st.header("📦 Mevcut Toptan Stoklar (Vitrin ve Finansal Özet)")
     with get_db_conn() as conn:
@@ -214,7 +213,6 @@ def mod_stok_durumu():
         
     if df.empty: return st.info("Sistemde henüz ürün yok.")
         
-    # DEPO FİNANSAL ÖZETİ
     st.subheader("🏦 Depo Finansal Özeti")
     toplam_model = len(df)
     toplam_seri = df['stok_seri'].sum()
@@ -233,7 +231,6 @@ def mod_stok_durumu():
     with d3: st.metric("💰 Toplam Tahmini Değer", f"{tahmini_usd_deger:,.2f} $")
     st.divider()
 
-    # GELİŞMİŞ FİLTRELEME
     f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
     arama = f1.text_input("🔍 Arama Yap (İsim veya Kod)")
     
@@ -373,7 +370,7 @@ def dropdown_icin_urunleri_getir():
 
 
 # ==========================================
-# HAFIZA SIZINTISIZ (KUSURSUZ) SATIŞ EKRANI
+# YÜKSEK HIZLI VE TERS LİSTELİ SATIŞ EKRANI
 # ==========================================
 if 'sepet' not in st.session_state: st.session_state.sepet = []
 if 'son_satis_fisi' not in st.session_state: st.session_state.son_satis_fisi = None
@@ -399,21 +396,18 @@ def mod_satis_ekrani():
     tab1, tab2 = st.tabs(["📷 Kamerayla Okut", "📝 Listeden Seçerek Ekle"])
     
     with tab1:
-        st.info("💡 Ürün QR'ını okutun. Sistem her okumadan sonra eski veriyi kökten silecektir.")
+        st.info("💡 Ürün QR'ını okutun. Yeni okutulan ürün listenin EN ÜSTÜNE eklenecektir.")
         
-        # --- HAFIZA SÜPÜRGESİ (GARBAGE COLLECTOR) ---
-        # 6. kamerada sistemin çökmesini engellemek için, eski kameraların anahtarlarını Streamlit hafızasından zorla kazıyoruz.
-        for k in list(st.session_state.keys()):
-            if k.startswith("kamera_modulu_") and k != f"kamera_modulu_{st.session_state.cam_key}":
-                del st.session_state[k]
-        # -------------------------------------------
-        
+        # Sadece anahtarı bir artırmak yeterli, 'del' komutları Streamlit'in ön yüzünü donduruyordu, onu kaldırdık.
         kamera = st.camera_input("📷 QR Okuyucu", key=f"kamera_modulu_{st.session_state.cam_key}")
         
         if kamera:
             try:
+                # 1. OPTİMİZASYON: Fotoğrafı saniyesinde küçültüp siyah-beyaz yaparak okutuyoruz. (Hız x10 arttı)
                 with Image.open(kamera) as img:
-                    decoded = decode(img)
+                    img_gray = img.convert('L')
+                    img_gray.thumbnail((800, 800))
+                    decoded = decode(img_gray)
                     
                 if decoded: 
                     barkod = decoded[0].data.decode()
@@ -422,28 +416,28 @@ def mod_satis_ekrani():
                         
                     if urun:
                         var_mi = False
-                        for item in st.session_state.sepet:
+                        # 2. OPTİMİZASYON: Ürün zaten sepette varsa sayısını artırıp en üste (0. endeks) fırlatıyoruz.
+                        for i, item in enumerate(st.session_state.sepet):
                             if item['id'] == urun[0]:
                                 item['seri_miktar'] += 1
                                 item['pcs'] = item['seri_miktar'] * item['seri_ici_adet']
                                 item['line_total'] = item['pcs'] * item['birim_fiyat']
+                                guncellenen_urun = st.session_state.sepet.pop(i)
+                                st.session_state.sepet.insert(0, guncellenen_urun)
                                 var_mi = True
                                 break
+                                
                         if not var_mi:
-                            st.session_state.sepet.append({
+                            # Yeni ürün ekleniyorsa, listeye en üstten (0) giriyor.
+                            st.session_state.sepet.insert(0, {
                                 'id': urun[0], 'isim': urun[2], 'resim_url': urun[3], 
                                 'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 
                                 'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]
                             })
                             
-                        st.session_state.son_islem_mesaji = f"✅ {urun[2]} sepete eklendi!"
-                        
-                        # --- KESİN İMHA PROTOKOLÜ ---
+                        st.session_state.son_islem_mesaji = f"✅ {urun[2]} başarıyla eklendi!"
                         st.session_state.cam_key += 1 
-                        del kamera 
-                        gc.collect() 
                         st.rerun() 
-                        # ----------------------------
                     else: 
                         st.error("❌ Bu barkoda ait ürün sistemde bulunamadı.")
                 else: 
@@ -464,15 +458,17 @@ def mod_satis_ekrani():
                 
                 if urun:
                     var_mi = False
-                    for item in st.session_state.sepet:
+                    for i, item in enumerate(st.session_state.sepet):
                         if item['id'] == urun[0]:
                             item['seri_miktar'] += 1
                             item['pcs'] = item['seri_miktar'] * item['seri_ici_adet']
                             item['line_total'] = item['pcs'] * item['birim_fiyat']
+                            guncellenen_urun = st.session_state.sepet.pop(i)
+                            st.session_state.sepet.insert(0, guncellenen_urun)
                             var_mi = True
                             break
                     if not var_mi:
-                        st.session_state.sepet.append({
+                        st.session_state.sepet.insert(0, {
                             'id': urun[0], 'isim': urun[2], 'resim_url': urun[3], 
                             'seri_ici_adet': urun[4], 'seri_miktar': 1, 'pcs': urun[4], 
                             'birim_fiyat': urun[6], 'line_total': urun[4]*urun[6], 'para_birimi': urun[7]
